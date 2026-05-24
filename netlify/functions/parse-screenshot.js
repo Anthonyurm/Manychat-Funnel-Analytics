@@ -6,8 +6,8 @@ exports.handler = async (event) => {
     return { statusCode: 405, body: 'Method not allowed' }
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) return { statusCode: 500, body: JSON.stringify({ error: 'ANTHROPIC_API_KEY not set' }) }
+  const apiKey = process.env.AI_SECRET_KEY
+  if (!apiKey) return { statusCode: 500, body: JSON.stringify({ error: 'AI_SECRET_KEY not set' }) }
 
   try {
     // Parse multipart - get base64 image data
