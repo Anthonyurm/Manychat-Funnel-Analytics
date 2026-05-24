@@ -40,7 +40,7 @@ export default function Login() {
             WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
           }}>FUNNEL ANALYTICS</div>
           <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', marginTop: 6, letterSpacing: 2 }}>
-            POWERED BY AI
+            POWERED BY THE ELITE ARTIST SOCIETY
           </div>
         </div>
 
