@@ -25,7 +25,7 @@ function PatternChip({ p }) {
 export default function MessageIntel() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [tab, setTab] = useState('ranking') // ranking | patterns
+  const [tab, setTab] = useState('ranking')
   const [aiText, setAiText] = useState('')
   const [aiLoading, setAiLoading] = useState(false)
 
@@ -58,8 +58,8 @@ Overall averages — M1 CTR: ${data.averages.m1_ctr_pct}%, Funnel CR: ${data.ave
 Analyze the MESSAGE COPY and give sharp, specific, actionable insights:
 1. What specific WORDS or PHRASES in the highest-converting messages drive clicks? Quote them directly.
 2. What do the LOWEST converters have in common? What to avoid?
-3. What's the single most impactful wording change for the next funnel?
-4. Write 2 new M1 message variations to A/B test, in the same voice/style as the existing messages.
+3. What is the single most impactful wording change for the next funnel?
+4. Write 2 new M1 message variations to A/B test, in the same voice and style as the existing messages.
 
 Be specific, reference actual messages and CTR numbers. Max 350 words.`
 
@@ -71,25 +71,21 @@ Be specific, reference actual messages and CTR numbers. Max 350 words.`
       })
 
       if (!resp.ok) throw new Error('Function error')
-      const reader = resp.body.getReader()
-      const decoder = new TextDecoder()
-      let full = ''
 
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        full += decoder.decode(value)
-        setAiText(full)
-      }
+      const text = await resp.text()
+      setAiText(text)
     } catch {
-      setAiText('AI analysis unavailable — check that your ANTHROPIC_API_KEY is set in Netlify environment variables.')
+      setAiText('AI analysis unavailable — make sure ANTHROPIC_API_KEY is set in Netlify environment variables (not VITE_ANTHROPIC_API_KEY).')
     }
     setAiLoading(false)
   }
 
   if (loading) return <Spinner />
   if (!data || data.funnels.length === 0) return (
-    <div className="empty-state"><h3>No funnels yet</h3><p>Add funnels first to see message analysis.</p></div>
+    <div className="empty-state">
+      <h3>No funnels yet</h3>
+      <p>Add funnels first to see message analysis.</p>
+    </div>
   )
 
   const { funnels, averages } = data
@@ -97,7 +93,6 @@ Be specific, reference actual messages and CTR numbers. Max 350 words.`
   const ranked = [...withMessages].sort((a, b) => (b.m1_ctr_pct || 0) - (a.m1_ctr_pct || 0))
   const bottom = [...withMessages].sort((a, b) => (a.m1_ctr_pct || 0) - (b.m1_ctr_pct || 0)).slice(0, 5)
 
-  // Pattern detection
   const PATTERNS = [
     { label: '"ayooo" opener', emoji: '👋', test: m => m.toLowerCase().startsWith('ayooo') },
     { label: '"thanks for liking"', emoji: '❤️', test: m => m.toLowerCase().includes('thanks for liking') },
@@ -131,7 +126,6 @@ Be specific, reference actual messages and CTR numbers. Max 350 words.`
         </button>
       </div>
 
-      {/* Tab bar */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 24, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: 4, width: 'fit-content' }}>
         {[['ranking', 'M1 Rankings'], ['patterns', 'Wording Patterns']].map(([id, label]) => (
           <button key={id} onClick={() => setTab(id)}
@@ -211,7 +205,6 @@ Be specific, reference actual messages and CTR numbers. Max 350 words.`
         </div>
       )}
 
-      {/* AI Analysis box */}
       {(aiText || aiLoading) && (
         <div className="card" style={{ marginTop: 24 }}>
           <div className="card-title">
@@ -219,11 +212,7 @@ Be specific, reference actual messages and CTR numbers. Max 350 words.`
             <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--muted)', fontWeight: 400, marginLeft: 8 }}>powered by Claude</span>
           </div>
           <div style={{ fontSize: 13, lineHeight: 1.9, whiteSpace: 'pre-wrap' }}>
-            {aiText
-              .replace(/\*\*(.*?)\*\*/g, '$1')
-              .split('\n')
-              .map((line, i) => <div key={i}>{line || <br />}</div>)
-            }
+            {aiText.split('\n').map((line, i) => <div key={i}>{line || <br />}</div>)}
             {aiLoading && <span style={{ display: 'inline-block', width: 2, height: 14, background: 'var(--accent)', animation: 'blink 0.8s infinite', verticalAlign: 'middle' }} />}
           </div>
         </div>
