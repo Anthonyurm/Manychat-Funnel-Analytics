@@ -259,4 +259,46 @@ export function computeOverview(funnels) {
       id: f.id,
       name: f.name,
       version: f.version,
-      keywords: f.keywords?.map(k => k.keyw
+      keywords: f.keywords?.map(k => k.keyword) || [],
+      total_sent: m1m?.sent || null,
+      effective_sent: effectiveSent,
+      funnel_cr_pct: funnelCr != null ? +(funnelCr * 100).toFixed(1) : null,
+      step_count: msgSteps.length,
+      max_step: msgSteps.length,
+      ...stepMetrics,
+    }
+  })
+
+  const maxSteps = Math.max(...rows.map(r => r.max_step || 1), 1)
+
+  const avg = (key, versionFilter) => {
+    const filtered = versionFilter ? rows.filter(r => r.version === versionFilter) : rows
+    const vals = filtered.map(r => r[key]).filter(v => v != null)
+    return vals.length ? +(vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1) : null
+  }
+
+  const buildAverages = (versionFilter) => {
+    const avgs = {}
+    for (let i = 1; i <= maxSteps; i++) {
+      avgs[`m${i}_open_rate_pct`] = avg(`m${i}_open_rate_pct`, versionFilter)
+      avgs[`m${i}_ctr_pct`] = avg(`m${i}_ctr_pct`, versionFilter)
+    }
+    avgs.funnel_cr_pct = avg('funnel_cr_pct', versionFilter)
+    avgs.total_sent = avg('total_sent', versionFilter)
+    return avgs
+  }
+
+  return {
+    funnels: rows,
+    averages: buildAverages(null),
+    maxSteps,
+    buildAverages,
+    versions: [...new Set(rows.map(r => r.version).filter(Boolean))],
+  }
+}
+
+function enrichFunnel(f) {
+  if (!f) return f
+  f.steps = (f.steps || []).sort((a, b) => a.step_order - b.step_order)
+  return f
+}
