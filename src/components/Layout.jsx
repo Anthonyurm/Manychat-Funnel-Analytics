@@ -16,8 +16,8 @@ export default function Layout({ session }) {
     <div className="shell">
       <nav className="sidebar">
         <div className="logo">
-          <div className="logo-mark">FUNNELS</div>
-          <div className="logo-sub">Analytics</div>
+          <div className="logo-mark">Funnel Analytics</div>
+          <div className="logo-sub">Elite Artist Society</div>
         </div>
 
         <div className="nav-section">Analytics</div>
@@ -39,13 +39,13 @@ export default function Layout({ session }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
             <div style={{
               width: 30, height: 30, borderRadius: 8,
-              background: 'rgba(124,92,252,0.2)', color: 'var(--accent)',
+              background: 'rgba(124,92,252,0.2)', color: '#b0a0ff',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700
+              fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700, flexShrink: 0
             }}>{initials}</div>
             <div style={{ fontSize: 12, color: 'var(--muted)', fontFamily: 'var(--mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 140 }}>{email}</div>
           </div>
-          <button className="btn btn-ghost btn-sm" style={{ width: '100%' }} onClick={signOut}>
+          <button className="btn btn-ghost btn-sm" style={{ width: '100%', justifyContent: 'center' }} onClick={signOut}>
             Sign out
           </button>
         </div>
