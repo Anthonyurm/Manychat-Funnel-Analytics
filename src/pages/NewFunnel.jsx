@@ -386,6 +386,39 @@ function ManualMode({ onDone }) {
 }
 
 // ── SCREENSHOT MODE ───────────────────────────────────────────────────────────
+// Calls Anthropic API directly from the browser to avoid Netlify's 10s timeout.
+// The VITE_ANTHROPIC_KEY env var is required — set it in Netlify environment variables.
+const VISION_PROMPT = `You are analyzing ManyChat flow builder screenshots for a music artist's Instagram DM automation. Treat all images as one continuous flow reading left to right.
+
+EXTRACTION RULES:
+1. ONLY extract Instagram Send Message nodes. SKIP everything else: Condition, Action, Smart Delay, When/trigger, External Request, Waiting nodes.
+2. At every conditional branch, follow the path with the HIGHER Sent count (majority path).
+3. From each Send Message node extract: full message body text, CTA button text (or null), and raw numbers for Sent, Opened, Clicked.
+4. SKIP any message where Sent is less than 20% of the previous message Sent count — these are check-in messages or minority paths.
+5. Label messages M1, M2, M3 etc in order following the majority path left to right and top to bottom.
+6. Compute ctr_raw = Clicked / Sent. Compute open_rate_raw = Opened / Sent. Convert percentages to decimals (56.7% becomes 0.567).
+
+Return ONLY this exact JSON, no markdown, no explanation:
+{
+  "steps": [
+    {
+      "order": 1,
+      "label": "M1",
+      "type": "message",
+      "message_text": "exact message copy from node",
+      "cta_text": "button label or null",
+      "sent": 637,
+      "opened": 431,
+      "clicked": 361,
+      "ctr_raw": 0.567,
+      "open_rate_raw": 0.678,
+      "notes": ""
+    }
+  ],
+  "connections": [{ "from_order": 1, "to_order": 2, "label": "clicked" }],
+  "funnel_notes": "summary of flow and which branches were followed"
+}`
+
 function ScreenshotMode({ onDone }) {
   const [funnelName, setFunnelName] = useState('')
   const [funnelVersion, setFunnelVersion] = useState('Song Out Now')
@@ -410,22 +443,69 @@ function ScreenshotMode({ onDone }) {
     if (files.length === 0 || !funnelName) return
     setStage('parsing')
     setError('')
+
     try {
-      const images = await Promise.all(files.map(async f => ({
-        base64: await fileToBase64(f),
-        type: f.type || 'image/png',
+      // Convert all images to base64
+      const imageContents = await Promise.all(files.map(async f => ({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: f.type || 'image/png',
+          data: await fileToBase64(f),
+        }
       })))
 
-      const resp = await fetch('/.netlify/functions/parse-screenshot', {
+      // Add instruction block after all images
+      const content = [
+        ...imageContents,
+        { type: 'text', text: VISION_PROMPT }
+      ]
+
+      // Call Anthropic API directly from browser — no server timeout
+      const apiKey = import.meta.env.VITE_ANTHROPIC_KEY
+      if (!apiKey) {
+        setError('VITE_ANTHROPIC_KEY is not set. Add it to your Netlify environment variables.')
+        setStage('upload')
+        return
+      }
+
+      const resp = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ images })
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
+        body: JSON.stringify({
+          model: 'claude-opus-4-5',
+          max_tokens: 3000,
+          messages: [{ role: 'user', content }]
+        })
       })
 
-      const result = await resp.json()
+      if (!resp.ok) {
+        const errText = await resp.text()
+        setError('API error: ' + errText)
+        setStage('upload')
+        return
+      }
 
-      if (result.error && !result.steps?.length) {
-        setError('Parse failed: ' + result.error)
+      const data = await resp.json()
+      const rawText = data.content?.[0]?.text || ''
+      const cleaned = rawText.trim().replace(/^```json?\s*/i, '').replace(/\s*```$/i, '').trim()
+
+      let result
+      try {
+        result = JSON.parse(cleaned)
+      } catch (e) {
+        setError('Could not parse AI response. Try uploading a clearer screenshot.')
+        setStage('upload')
+        return
+      }
+
+      if (!result.steps?.length) {
+        setError('No message steps detected. Make sure the screenshot clearly shows ManyChat Send Message nodes.')
         setStage('upload')
         return
       }
@@ -433,7 +513,7 @@ function ScreenshotMode({ onDone }) {
       setParsed(result)
       setStage('confirm')
     } catch (err) {
-      setError('Error: ' + err.message)
+      setError('Parse failed: ' + err.message)
       setStage('upload')
     }
   }
@@ -443,6 +523,7 @@ function ScreenshotMode({ onDone }) {
     try {
       const f = await createFunnel({ name: funnelName, version: funnelVersion })
       setFunnelId(f.id)
+      // Only save steps that were not flagged as wrong
       const stepsToSave = (parsed.steps || []).filter((_, i) => !flagged[i])
       await saveScreenshotSteps(f.id, stepsToSave)
       setStage('done')
