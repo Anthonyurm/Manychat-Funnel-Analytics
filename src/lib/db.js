@@ -149,8 +149,7 @@ export async function importCSVRows(rows) {
       if (goalStep && row.funnel_cr != null && row.m1_sent) {
         await supabase.from('step_metrics').insert({
           step_id: goalStep.id, user_id: user.id,
-          sent: row.m1_sent,
-          clicked: Math.round(row.funnel_cr * row.m1_sent),
+          sent: row.m1_sent, clicked: Math.round(row.funnel_cr * row.m1_sent),
           ctr: row.funnel_cr, source: 'csv_import'
         })
       }
@@ -228,22 +227,33 @@ export async function saveScreenshotSteps(funnelId, parsedSteps) {
 export function computeOverview(funnels) {
   const rows = funnels.map(f => {
     const steps = f.steps || []
-    const msgSteps = steps.filter(s => s.step_type !== 'goal').sort((a, b) => a.step_order - b.step_order)
+    const msgSteps = steps
+      .filter(s => s.step_type !== 'goal')
+      .sort((a, b) => a.step_order - b.step_order)
     const goalStep = steps.find(s => s.step_type === 'goal')
     const m1 = msgSteps[0]
     const m1m = m1?.step_metrics?.[0]
     const gm = goalStep?.step_metrics?.[0]
 
-    const lastMsgWithSent = [...msgSteps].reverse().find(s => s.step_metrics?.[0]?.sent)
-    const lastSent = lastMsgWithSent?.step_metrics?.[0]?.sent
+    // Effective sent: if M2 sent < 70% of expected (M1 sent x M1 CTR),
+    // the funnel was updated mid-run — reverse-engineer true cohort from M2 sent / M1 CTR
+    let effectiveSent = m1m?.sent || null
     const m1Ctr = m1m?.ctr
-    const effectiveSent = lastSent && m1Ctr && m1Ctr > 0
-      ? Math.round(lastSent / m1Ctr)
-      : m1m?.sent || null
 
-    const goalClicks = gm?.clicked
-    const funnelCr = goalClicks && effectiveSent ? goalClicks / effectiveSent : (gm?.ctr || null)
+    if (msgSteps.length >= 2 && m1m?.sent && m1Ctr) {
+      const m2 = msgSteps[1]
+      const m2m = m2?.step_metrics?.[0]
+      if (m2m?.sent) {
+        const expectedM2 = m1m.sent * m1Ctr
+        const ratio = m2m.sent / expectedM2
+        if (ratio < 0.7) {
+          // Funnel was updated — reverse-engineer true cohort
+          effectiveSent = Math.round(m2m.sent / m1Ctr)
+        }
+      }
+    }
 
+    // Build per-step metrics
     const stepMetrics = {}
     msgSteps.forEach((s, i) => {
       const sm = s.step_metrics?.[0]
@@ -253,7 +263,25 @@ export function computeOverview(funnels) {
       stepMetrics[`${key}_sent`] = sm?.sent || null
       stepMetrics[`${key}_message`] = s.message_text || null
       stepMetrics[`${key}_cta`] = s.cta_text || null
+      // Reach rate: what % of the true cohort made it to this step
+      stepMetrics[`${key}_reach_pct`] = sm?.sent && effectiveSent
+        ? +(sm.sent / effectiveSent * 100).toFixed(1) : null
     })
+
+    // Funnel CR: goal clicks / effective sent, or last step clicks / effective sent
+    const goalClicks = gm?.clicked
+    let funnelCr = null
+    if (goalClicks && effectiveSent) {
+      funnelCr = goalClicks / effectiveSent
+    } else if (gm?.ctr) {
+      funnelCr = gm.ctr
+    } else {
+      const lastMsg = [...msgSteps].reverse().find(s => s.step_metrics?.[0]?.clicked)
+      const lastClicks = lastMsg?.step_metrics?.[0]?.clicked
+      if (lastClicks && effectiveSent) {
+        funnelCr = lastClicks / effectiveSent
+      }
+    }
 
     return {
       id: f.id,
@@ -282,9 +310,11 @@ export function computeOverview(funnels) {
     for (let i = 1; i <= maxSteps; i++) {
       avgs[`m${i}_open_rate_pct`] = avg(`m${i}_open_rate_pct`, versionFilter)
       avgs[`m${i}_ctr_pct`] = avg(`m${i}_ctr_pct`, versionFilter)
+      avgs[`m${i}_reach_pct`] = avg(`m${i}_reach_pct`, versionFilter)
     }
     avgs.funnel_cr_pct = avg('funnel_cr_pct', versionFilter)
     avgs.total_sent = avg('total_sent', versionFilter)
+    avgs.effective_sent = avg('effective_sent', versionFilter)
     return avgs
   }
 

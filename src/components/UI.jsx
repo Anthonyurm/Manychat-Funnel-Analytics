@@ -55,6 +55,7 @@ export function StatCard({ label, value, unit, delta }) {
   )
 }
 
+// Column header with tooltip
 export function ThWithTip({ label, tip, sortKey, sortState, onSort }) {
   const [show, setShow] = useState(false)
   const isSorted = sortState?.key === sortKey

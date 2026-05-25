@@ -3,6 +3,12 @@
   publish = "dist"
   functions = "netlify/functions"
 
+[functions]
+  node_bundler = "esbuild"
+
+[functions."parse-screenshot"]
+  included_files = []
+
 [[redirects]]
   from = "/*"
   to = "/index.html"

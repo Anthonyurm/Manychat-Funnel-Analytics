@@ -3,6 +3,7 @@ import { getFunnels, computeOverview } from '../lib/db'
 import { Spinner, pct, colorFor, VERSIONS } from '../components/UI'
 
 function neutralCheck(withMessages, patterns) {
+  // Find patterns that appear significantly in BOTH top and bottom converters
   const sorted = [...withMessages].sort((a, b) => (b.m1_ctr_pct || 0) - (a.m1_ctr_pct || 0))
   const top = sorted.slice(0, Math.ceil(sorted.length / 2))
   const bottom = sorted.slice(Math.ceil(sorted.length / 2))
@@ -80,7 +81,7 @@ Be specific, quote actual copy, reference CTR numbers. Max 400 words.`
     <div className="empty-state"><h3>No funnels yet</h3><p>Add funnels first to see message analysis.</p></div>
   )
 
-  const { funnels, versions, buildAverages } = data
+  const { funnels, averages, versions, buildAverages } = data
   const filteredFunnels = versionFilter === 'all' ? funnels : funnels.filter(f => f.version === versionFilter)
   const filteredAverages = buildAverages(versionFilter === 'all' ? null : versionFilter)
 
@@ -128,7 +129,7 @@ Be specific, quote actual copy, reference CTR numbers. Max 400 words.`
           <div className="version-filter">
             <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)' }}>Filter:</span>
             <select value={versionFilter} onChange={e => setVersionFilter(e.target.value)}>
-              <option value="all">All Types</option>
+              <option value="all">All Versions</option>
               {versions.map(v => <option key={v} value={v}>{v}</option>)}
             </select>
           </div>
@@ -138,19 +139,21 @@ Be specific, quote actual copy, reference CTR numbers. Max 400 words.`
         </div>
       </div>
 
+      {/* Neutral pattern callout at top */}
       {neutralPatterns.length > 0 && (
         <div style={{ background: 'rgba(136,136,170,0.08)', border: '1px solid var(--border)', borderRadius: 10, padding: '14px 18px', marginBottom: 24, fontSize: 13, lineHeight: 1.6 }}>
-          ⚠️ <strong style={{ color: 'var(--muted)' }}>Neutral Patterns Detected</strong> — the following wording appears equally in both your top AND bottom converting funnels, meaning it likely does not influence conversion either way:{' '}
+          ⚠️ <strong style={{ color: 'var(--muted)' }}>Neutral Patterns Detected</strong> — the following wording appears equally in both your top AND bottom converting funnels, meaning it likely doesn't influence conversion either way:{' '}
           {neutralPatterns.map((p, i) => (
             <span key={i}>
               <strong style={{ color: 'var(--text)' }}>{p.emoji} {p.label}</strong>
               {i < neutralPatterns.length - 1 ? ', ' : ''}
             </span>
           ))}
-          . Do not rely on these as conversion levers.
+          . Don't rely on these as conversion levers.
         </div>
       )}
 
+      {/* Tabs */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 24, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: 4, width: 'fit-content' }}>
         {[['ranking', 'M1 Rankings'], ['patterns', 'Wording Patterns']].map(([id, label]) => (
           <button key={id} onClick={() => setTab(id)}
@@ -207,6 +210,7 @@ Be specific, quote actual copy, reference CTR numbers. Max 400 words.`
 
       {tab === 'patterns' && (
         <div>
+          {/* Positive patterns */}
           {positivePatterns.length > 0 && (
             <div className="card" style={{ marginBottom: 16 }}>
               <div className="card-title">✅ Patterns That Help Conversion</div>
@@ -219,11 +223,12 @@ Be specific, quote actual copy, reference CTR numbers. Max 400 words.`
             </div>
           )}
 
+          {/* Neutral patterns */}
           {neutralPatterns.length > 0 && (
             <div className="card" style={{ marginBottom: 16 }}>
               <div className="card-title">➖ Neutral Patterns — Not a Conversion Lever</div>
               <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', marginBottom: 12 }}>
-                These appear in both top and bottom converters — the data says they do not meaningfully impact CTR.
+                These appear in both top and bottom converters — the data says they don't meaningfully impact CTR.
               </div>
               {neutralPatterns.map((p, i) => (
                 <div key={i} style={{ padding: '8px 0', borderBottom: '1px solid var(--border)', fontSize: 13, lineHeight: 1.7 }}>
@@ -234,6 +239,7 @@ Be specific, quote actual copy, reference CTR numbers. Max 400 words.`
             </div>
           )}
 
+          {/* Negative patterns */}
           {negativePatterns.length > 0 && (
             <div className="card" style={{ marginBottom: 16 }}>
               <div className="card-title">❌ Patterns That Hurt Conversion</div>
@@ -256,6 +262,7 @@ Be specific, quote actual copy, reference CTR numbers. Max 400 words.`
         </div>
       )}
 
+      {/* AI box */}
       {(aiText || aiLoading) && (
         <div className="card" style={{ marginTop: 24 }}>
           <div className="card-title">

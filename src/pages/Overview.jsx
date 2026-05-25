@@ -56,6 +56,7 @@ export default function Overview() {
   if (!data) return null
 
   const { funnels, maxSteps, buildAverages, versions } = data
+
   const filteredFunnels = versionFilter === 'all' ? funnels : funnels.filter(f => f.version === versionFilter)
   const averages = buildAverages(versionFilter === 'all' ? null : versionFilter)
 
@@ -74,37 +75,28 @@ export default function Overview() {
 
   const sp = { key: sort.key, dir: sort.dir }
 
+  // Build step columns dynamically
   const stepCols = []
   for (let i = 1; i <= maxSteps; i++) {
-    stepCols.push({ openKey: `m${i}_open_rate_pct`, ctrKey: `m${i}_ctr_pct`, label: `M${i}` })
+    stepCols.push({
+      openKey: `m${i}_open_rate_pct`,
+      ctrKey: `m${i}_ctr_pct`,
+      label: `M${i}`,
+    })
   }
-
-  if (funnels.length === 0) return (
-    <div>
-      <div className="page-header">
-        <div><div className="page-title">Overview ⚡</div></div>
-        <button className="btn btn-primary" onClick={() => navigate('/funnels/new')}>＋ Add First Funnel</button>
-      </div>
-      <div className="empty-state">
-        <h3>No funnels yet</h3>
-        <p>Add your first funnel via CSV, manually, or screenshot.</p>
-        <button className="btn btn-primary" style={{ marginTop: 20 }} onClick={() => navigate('/funnels/new')}>＋ Add Funnel</button>
-      </div>
-    </div>
-  )
 
   return (
     <div>
       <div className="page-header">
         <div>
           <div className="page-title">Overview ⚡</div>
-          <div className="page-subtitle">Cross-funnel performance · hover columns for info · click to sort</div>
+          <div className="page-subtitle">Cross-funnel performance · click columns to sort</div>
         </div>
         <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
           <div className="version-filter">
             <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)' }}>Filter:</span>
             <select value={versionFilter} onChange={e => setVersionFilter(e.target.value)}>
-              <option value="all">All Types</option>
+              <option value="all">All Versions</option>
               {versions.map(v => <option key={v} value={v}>{v}</option>)}
             </select>
           </div>
@@ -112,14 +104,16 @@ export default function Overview() {
         </div>
       </div>
 
+      {/* Stat cards */}
       <div className="stat-grid">
         <StatCard label="Avg M1 Open Rate" value={averages.m1_open_rate_pct ?? '—'} unit="%" delta="opened / sent" />
         <StatCard label="Avg M1 CTR" value={averages.m1_ctr_pct ?? '—'} unit="%" delta="clicked / sent" />
-        <StatCard label="Avg M2 CTR" value={averages.m2_ctr_pct ?? '—'} unit="%" delta="follow-up step" />
+        <StatCard label={`Avg M2 CTR`} value={averages.m2_ctr_pct ?? '—'} unit="%" delta="follow-up step" />
         <StatCard label="Avg Funnel CR" value={averages.funnel_cr_pct ?? '—'} unit="%" delta="end-to-end" />
         <StatCard label="Total Volume" value={totalVol.toLocaleString()} unit="" delta="people entered flows" />
       </div>
 
+      {/* Insight */}
       {best && bestM1 && (
         <div className="insight">
           🔍 <strong>{best.name}</strong> is your top-converting funnel at <strong>{best.funnel_cr_pct}% CR</strong>.{' '}
@@ -127,10 +121,10 @@ export default function Overview() {
           {bestM1.m1_ctr_pct > (averages.m1_ctr_pct || 0)
             ? ` — ${(bestM1.m1_ctr_pct - averages.m1_ctr_pct).toFixed(1)}pp above your ${versionFilter !== 'all' ? versionFilter + ' ' : ''}average.`
             : '.'}
-          {' '}<span style={{ color: 'var(--muted)' }}>→ Head to <strong style={{ color: 'var(--accent)' }}>Message Intel</strong> to see which wording patterns drive those results.</span>
         </div>
       )}
 
+      {/* Table */}
       <div className="table-wrap">
         <div className="table-header">
           <div className="table-title">
@@ -143,7 +137,7 @@ export default function Overview() {
             <tr>
               <th></th>
               <ThWithTip label="Funnel" tip={COLUMN_TIPS.name} sortKey="name" sortState={sp} onSort={toggleSort} />
-              <ThWithTip label="Type" tip={COLUMN_TIPS.version} sortKey="version" sortState={sp} onSort={toggleSort} />
+              <ThWithTip label="Version" tip={COLUMN_TIPS.version} sortKey="version" sortState={sp} onSort={toggleSort} />
               <th>Trigger Words</th>
               {stepCols.map(col => (
                 <>
@@ -157,6 +151,7 @@ export default function Overview() {
             </tr>
           </thead>
           <tbody>
+            {/* Averages row */}
             <tr className="avg-row">
               <td></td>
               <td className="name-cell">AVG {versionFilter !== 'all' ? `(${versionFilter})` : ''}</td>
@@ -177,6 +172,7 @@ export default function Overview() {
               <tr key={f.id} onClick={() => editingId !== f.id && navigate(`/funnels/${f.id}`)}>
                 <td><span style={{ fontFamily: 'var(--mono)', color: 'var(--muted)', fontSize: 11 }}>#{i + 1}</span></td>
 
+                {/* Editable name */}
                 <td className="name-cell" onClick={e => e.stopPropagation()}>
                   {editingId === f.id ? (
                     <div className="inline-edit-wrap">
@@ -185,10 +181,13 @@ export default function Overview() {
                       <button className="btn btn-ghost btn-sm" onClick={() => setEditingId(null)}>✗</button>
                     </div>
                   ) : (
-                    <span title="Click ✏ to edit">{f.name}</span>
+                    <span onDoubleClick={() => { setEditingId(f.id); setEditVals({ name: f.name, version: f.version }) }} title="Double-click to edit">
+                      {f.name}
+                    </span>
                   )}
                 </td>
 
+                {/* Editable version */}
                 <td onClick={e => e.stopPropagation()}>
                   {editingId === f.id ? (
                     <select className="form-input" style={{ padding: '4px 8px', fontSize: 12 }} value={editVals.version || ''} onChange={e => setEditVals(v => ({ ...v, version: e.target.value }))}>
@@ -199,7 +198,7 @@ export default function Overview() {
                   )}
                 </td>
 
-                <td className="mono-cell" style={{ maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--muted)' }}>
+                <td className="mono-cell" style={{ maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--muted)' }}>
                   {f.keywords.join(', ') || '—'}
                 </td>
 

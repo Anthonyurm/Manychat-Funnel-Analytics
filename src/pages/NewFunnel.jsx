@@ -1,8 +1,8 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { parseCSV } from '../lib/csvParser'
 import { importCSVRows, createFunnel, upsertStep, upsertMetric, saveScreenshotSteps } from '../lib/db'
-import { VERSIONS } from '../components/UI'
+import { Spinner, VERSIONS } from '../components/UI'
 
 const MODES = [
   { id: 'csv', icon: '📄', label: 'Upload CSV', sub: 'Import your Google Sheets export' },
@@ -60,11 +60,13 @@ function CSVMode({ onDone }) {
 
 // ── NODE CANVAS ───────────────────────────────────────────────────────────────
 const NODE_TYPES = ['message', 'condition', 'goal']
+const NODE_COLORS = { message: 'var(--accent)', condition: 'var(--accent3)', goal: 'var(--gold)' }
 
 function NodeCanvas({ nodes, setNodes, edges, setEdges, selectedId, setSelectedId }) {
   const canvasRef = useRef(null)
   const dragging = useRef(null)
   const connecting = useRef(null)
+  const [mousePos, setMousePos] = useState({ x: 0, y: 0 })
 
   const getOffset = () => {
     const rect = canvasRef.current?.getBoundingClientRect()
@@ -80,11 +82,12 @@ function NodeCanvas({ nodes, setNodes, edges, setEdges, selectedId, setSelectedI
   }
 
   function onMouseMove(e) {
+    const offset = getOffset()
+    setMousePos({ x: e.clientX - offset.x, y: e.clientY - offset.y })
     if (dragging.current) {
-      const offset = getOffset()
       const { nodeId, startX, startY } = dragging.current
-      const x = Math.max(0, e.clientX - offset.x - startX)
-      const y = Math.max(0, e.clientY - offset.y - startY)
+      const x = e.clientX - offset.x - startX
+      const y = e.clientY - offset.y - startY
       setNodes(ns => ns.map(n => n.id === nodeId ? { ...n, x, y } : n))
     }
   }
@@ -109,6 +112,7 @@ function NodeCanvas({ nodes, setNodes, edges, setEdges, selectedId, setSelectedI
     setEdges(es => es.filter(e => !(e.from === from && e.to === to)))
   }
 
+  // Draw SVG edges
   const edgePaths = edges.map((edge, i) => {
     const fromNode = nodes.find(n => n.id === edge.from)
     const toNode = nodes.find(n => n.id === edge.to)
@@ -117,12 +121,12 @@ function NodeCanvas({ nodes, setNodes, edges, setEdges, selectedId, setSelectedI
     const y1 = fromNode.y + 110
     const x2 = toNode.x + 100
     const y2 = toNode.y
-    const color = edge.portType === 'out-yes' ? '#3dffa0' : edge.portType === 'out-no' ? '#fc5c7d' : '#2e2e45'
-    const my = (y1 + y2) / 2
+    const color = edge.portType === 'out-yes' ? 'var(--accent3)' : edge.portType === 'out-no' ? 'var(--accent2)' : 'var(--border)'
+    const mx = (x1 + x2) / 2
     return (
       <g key={i} onClick={() => removeEdge(edge.from, edge.to)} style={{ cursor: 'pointer' }}>
-        <path d={`M ${x1} ${y1} C ${x1} ${my} ${x2} ${my} ${x2} ${y2}`} stroke={color} strokeWidth={2} fill="none" />
-        <text x={(x1 + x2) / 2} y={my} fill={color} fontSize={10} textAnchor="middle" fontFamily="var(--mono)" style={{ pointerEvents: 'none' }}>{edge.label}</text>
+        <path d={`M ${x1} ${y1} C ${x1} ${mx} ${x2} ${mx} ${x2} ${y2}`} stroke={color} strokeWidth={2} fill="none" />
+        <text x={mx} y={(y1 + y2) / 2} fill={color} fontSize={10} textAnchor="middle" fontFamily="var(--mono)" style={{ pointerEvents: 'none' }}>{edge.label}</text>
       </g>
     )
   })
@@ -132,28 +136,27 @@ function NodeCanvas({ nodes, setNodes, edges, setEdges, selectedId, setSelectedI
       onMouseMove={onMouseMove} onMouseUp={onMouseUp}
       onClick={() => setSelectedId(null)}>
       <svg className="canvas-edge">{edgePaths}</svg>
-      {nodes.map(node => {
-        const borderColor = node.type === 'condition' ? 'rgba(61,255,160,0.5)' : node.type === 'goal' ? 'rgba(255,209,102,0.5)' : 'var(--border)'
-        return (
-          <div key={node.id}
-            className={'node' + (selectedId === node.id ? ' selected' : '')}
-            style={{ left: node.x, top: node.y, borderColor: selectedId === node.id ? 'var(--accent)' : borderColor }}
-            onMouseDown={e => onMouseDown(e, node.id)}>
-            <div className="node-label" style={{ color: node.type === 'condition' ? '#3dffa0' : node.type === 'goal' ? '#ffd166' : 'var(--muted)' }}>{node.type.toUpperCase()}</div>
-            <div className="node-title">{node.label || `Node ${node.id}`}</div>
-            {node.message_text && <div className="node-msg">{node.message_text.slice(0, 55)}{node.message_text.length > 55 ? '…' : ''}</div>}
-            <div className="node-port in" onMouseUp={e => endConnect(e, node.id)} />
-            {node.type === 'condition' ? (
-              <>
-                <div className="node-port out-yes" onMouseDown={e => startConnect(e, node.id, 'out-yes')} title="Yes path" />
-                <div className="node-port out-no" onMouseDown={e => startConnect(e, node.id, 'out-no')} title="No path" />
-              </>
-            ) : (
-              <div className="node-port out" onMouseDown={e => startConnect(e, node.id, 'out')} />
-            )}
-          </div>
-        )
-      })}
+      {nodes.map(node => (
+        <div key={node.id}
+          className={'node' + (selectedId === node.id ? ' selected' : '') + (node.type === 'condition' ? ' condition-node' : '')}
+          style={{ left: node.x, top: node.y, borderColor: selectedId === node.id ? NODE_COLORS[node.type] : undefined }}
+          onMouseDown={e => onMouseDown(e, node.id)}>
+          <div className="node-label">{node.type.toUpperCase()}</div>
+          <div className="node-title">{node.label || `Node ${node.id}`}</div>
+          {node.message_text && <div className="node-msg" style={{ fontSize: 10 }}>{node.message_text.slice(0, 60)}{node.message_text.length > 60 ? '…' : ''}</div>}
+          {/* Port for input */}
+          <div className="node-port in" onMouseUp={e => endConnect(e, node.id)} />
+          {/* Output port(s) */}
+          {node.type === 'condition' ? (
+            <>
+              <div className="node-port out-yes" onMouseDown={e => startConnect(e, node.id, 'out-yes')} title="Yes path" />
+              <div className="node-port out-no" onMouseDown={e => startConnect(e, node.id, 'out-no')} title="No path" />
+            </>
+          ) : (
+            <div className="node-port out" onMouseDown={e => startConnect(e, node.id, 'out')} />
+          )}
+        </div>
+      ))}
     </div>
   )
 }
@@ -178,7 +181,7 @@ function ManualMode({ onDone }) {
     const id = nextId.current++
     const msgNodes = nodes.filter(n => n.type === 'message')
     const label = type === 'message' ? `M${msgNodes.length + 1}` : type === 'condition' ? 'Condition' : 'Goal'
-    setNodes(ns => [...ns, { id, type, label, message_text: '', cta_text: '', x: 60 + (ns.length * 30), y: 80 + (ns.length * 15), sent: '', opened: '', clicked: '' }])
+    setNodes(ns => [...ns, { id, type, label, message_text: '', cta_text: '', x: 260 + (ns.length * 20), y: 60 + (ns.length * 20), sent: '', opened: '', clicked: '' }])
   }
 
   function updateNode(id, field, val) {
@@ -209,13 +212,17 @@ function ManualMode({ onDone }) {
     setSaving(true)
     setError('')
     try {
+      // Order message nodes by x position
       const msgNodes = nodes.filter(n => n.type === 'message').sort((a, b) => a.x - b.x)
       for (let i = 0; i < msgNodes.length; i++) {
         const node = msgNodes[i]
         const created = await upsertStep({
-          funnel_id: funnelId, step_order: i + 1,
-          label: node.label || `M${i + 1}`, step_type: 'message',
-          message_text: node.message_text || null, cta_text: node.cta_text || null,
+          funnel_id: funnelId,
+          step_order: i + 1,
+          label: node.label || `M${i + 1}`,
+          step_type: 'message',
+          message_text: node.message_text || null,
+          cta_text: node.cta_text || null,
         })
         if (node.sent || node.clicked) {
           await upsertMetric({
@@ -226,11 +233,16 @@ function ManualMode({ onDone }) {
           })
         }
       }
+      // Save goal node if exists
       const goalNode = nodes.find(n => n.type === 'goal')
       if (goalNode) {
         const created = await upsertStep({
-          funnel_id: funnelId, step_order: msgNodes.length + 1,
-          label: 'Goal', step_type: 'goal', message_text: null, cta_text: null,
+          funnel_id: funnelId,
+          step_order: msgNodes.length + 1,
+          label: 'Goal',
+          step_type: 'goal',
+          message_text: null,
+          cta_text: null,
         })
         if (goalNode.sent || goalNode.clicked) {
           await upsertMetric({
@@ -272,22 +284,23 @@ function ManualMode({ onDone }) {
 
   return (
     <form onSubmit={saveSteps}>
-      <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={() => addNode('message')}>＋ Message</button>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={() => addNode('condition')}>＋ Condition</button>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={() => addNode('goal')}>＋ Goal</button>
-        <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)' }}>
-          Drag nodes · Drag bottom dot to connect · Click edge to remove
-        </span>
+      <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => addNode('message')}>＋ Message Node</button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => addNode('condition')}>＋ Condition Node</button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => addNode('goal')}>＋ Goal Node</button>
+        <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', alignSelf: 'center' }}>
+          Drag nodes to position · Drag from bottom port to connect · Click an edge to remove it
+        </div>
       </div>
 
       <NodeCanvas nodes={nodes} setNodes={setNodes} edges={edges} setEdges={setEdges} selectedId={selectedId} setSelectedId={setSelectedId} />
 
+      {/* Node editor panel */}
       {selectedNode && (
         <div className="card" style={{ marginTop: 16 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-            <div className="card-title" style={{ marginBottom: 0 }}>Editing: {selectedNode.label}</div>
-            <button type="button" className="btn btn-danger btn-sm" onClick={() => removeNode(selectedNode.id)}>Remove</button>
+            <div className="card-title" style={{ marginBottom: 0 }}>Edit: {selectedNode.label}</div>
+            <button type="button" className="btn btn-danger btn-sm" onClick={() => removeNode(selectedNode.id)}>Remove Node</button>
           </div>
           <div className="form-row">
             <div className="form-group">
@@ -309,7 +322,7 @@ function ManualMode({ onDone }) {
               </div>
               <div className="form-group">
                 <label className="form-label">CTA Button Text</label>
-                <input className="form-input" value={selectedNode.cta_text} onChange={e => updateNode(selectedNode.id, 'cta_text', e.target.value)} placeholder="e.g. get the song, listen now, join discord" />
+                <input className="form-input" value={selectedNode.cta_text} onChange={e => updateNode(selectedNode.id, 'cta_text', e.target.value)} placeholder="e.g. get the song, listen now" />
               </div>
               <div className="form-row-3">
                 {['sent', 'opened', 'clicked'].map(field => (
@@ -363,7 +376,9 @@ function ScreenshotMode({ onDone }) {
       const f = await createFunnel({ name: funnelName, version: funnelVersion })
       setFunnelId(f.id)
 
+      // Process each image and combine results
       let allSteps = []
+      let allConnections = []
       let stepOffset = 0
 
       for (let i = 0; i < files.length; i++) {
@@ -379,22 +394,27 @@ function ScreenshotMode({ onDone }) {
 
         const parsed = await resp.json()
         if (parsed.error && !parsed.steps?.length) {
-          setStatus(`Warning on image ${i + 1}: ${parsed.error}`)
+          setStatus(`Warning: Image ${i + 1} returned an error — ${parsed.error}`)
           continue
         }
 
+        // Offset step orders for subsequent images
         const offsetSteps = (parsed.steps || []).map(s => ({ ...s, order: s.order + stepOffset }))
+        const offsetConns = (parsed.connections || []).map(c => ({ ...c, from_order: c.from_order + stepOffset, to_order: c.to_order + stepOffset }))
+
         allSteps = [...allSteps, ...offsetSteps]
+        allConnections = [...allConnections, ...offsetConns]
         stepOffset += (parsed.steps || []).length
       }
 
-      // Deduplicate
+      // Deduplicate by order (in case images overlap)
       const seen = new Set()
       allSteps = allSteps.filter(s => { if (seen.has(s.order)) return false; seen.add(s.order); return true })
 
       setStatus('Saving to database…')
       await saveScreenshotSteps(f.id, allSteps)
-      setResult({ steps: allSteps })
+
+      setResult({ steps: allSteps, connections: allConnections, funnel_notes: `Parsed from ${files.length} image(s)` })
       setStatus('Done!')
     } catch (err) {
       setStatus('Error: ' + err.message)
@@ -424,14 +444,16 @@ function ScreenshotMode({ onDone }) {
         onDrop={e => { e.preventDefault(); e.currentTarget.classList.remove('over'); setFiles(Array.from(e.dataTransfer.files)) }}>
         <div style={{ fontSize: 32, marginBottom: 8 }}>{files.length > 0 ? '✅' : '🖼️'}</div>
         <div className="upload-title">{files.length > 0 ? `${files.length} image(s) selected` : 'Drop ManyChat screenshots here'}</div>
-        <div className="upload-sub">PNG, JPG, WEBP · Upload multiple images if your flow is wide</div>
+        <div className="upload-sub">PNG, JPG, WEBP · You can upload multiple images if your flow is wide</div>
         <input id="ss-input" type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={e => setFiles(Array.from(e.target.files))} />
       </div>
 
       {files.length > 0 && (
         <div style={{ marginBottom: 12 }}>
           {files.map((f, i) => (
-            <div key={i} style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', padding: '3px 0' }}>📄 {f.name}</div>
+            <div key={i} style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', padding: '3px 0' }}>
+              📄 {f.name}
+            </div>
           ))}
         </div>
       )}
@@ -453,6 +475,7 @@ function ScreenshotMode({ onDone }) {
               {s.cta_text && <span style={{ color: 'var(--gold)', marginLeft: 8 }}>CTA: "{s.cta_text}"</span>}
             </div>
           ))}
+          {result.funnel_notes && <div style={{ marginTop: 10, color: 'var(--muted)', fontSize: 12 }}>{result.funnel_notes}</div>}
           <button type="button" className="btn btn-primary" style={{ marginTop: 14 }} onClick={() => onDone(funnelId)}>View Funnel →</button>
         </div>
       )}
