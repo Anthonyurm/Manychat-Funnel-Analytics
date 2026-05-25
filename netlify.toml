@@ -5,9 +5,7 @@
 
 [functions]
   node_bundler = "esbuild"
-
-[functions."parse-screenshot"]
-  included_files = []
+  timeout = 30
 
 [[redirects]]
   from = "/*"

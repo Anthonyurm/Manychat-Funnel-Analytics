@@ -1,35 +1,67 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { parseCSV } from '../lib/csvParser'
 import { importCSVRows, createFunnel, upsertStep, upsertMetric, saveScreenshotSteps } from '../lib/db'
-import { Spinner, VERSIONS } from '../components/UI'
+import { VERSIONS } from '../components/UI'
 
 const MODES = [
   { id: 'csv', icon: '📄', label: 'Upload CSV', sub: 'Import your Google Sheets export' },
-  { id: 'manual', icon: '✏️', label: 'Build Manually', sub: 'Visual node-based flow builder with metrics' },
-  { id: 'screenshot', icon: '🖼️', label: 'Screenshot', sub: 'Upload a ManyChat flow image — AI parses nodes + metrics' },
+  { id: 'manual', icon: '✏️', label: 'Build Manually', sub: 'Visual node builder with conditional branching' },
+  { id: 'screenshot', icon: '🖼️', label: 'Screenshot', sub: 'Upload ManyChat flow images — AI parses nodes and metrics' },
 ]
 
 // ── CSV MODE ──────────────────────────────────────────────────────────────────
 function CSVMode({ onDone }) {
-  const [status, setStatus] = useState('')
+  const [stage, setStage] = useState('upload')
+  const [parsedRows, setParsedRows] = useState([])
+  const [issues, setIssues] = useState([])
+  const [clarifications, setClarifications] = useState({})
   const [results, setResults] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [status, setStatus] = useState('')
+
+  function detectIssues(rows) {
+    const found = []
+    rows.forEach((row, i) => {
+      if (!row.name || row.name === 'UNKNOWN') found.push({ row: i, field: 'name', msg: `Row ${i + 1}: funnel name is missing or unclear — got "${row.name}"` })
+      if (row.m1_sent == null && row.m1_clicked == null) found.push({ row: i, field: 'm1_metrics', msg: `Row ${i + 1} (${row.name}): no M1 sent or clicked data found` })
+      if (row.version === 'UNKNOWN') found.push({ row: i, field: 'version', msg: `Row ${i + 1} (${row.name}): funnel type could not be detected` })
+    })
+    return found
+  }
 
   async function handleFile(file) {
     setLoading(true)
     setStatus('Parsing CSV…')
     try {
       const rows = await parseCSV(file)
-      setStatus(`Found ${rows.length} funnels — importing…`)
-      const res = await importCSVRows(rows)
-      setResults(res)
-      setStatus('Done!')
-    } catch (e) { setStatus('Error: ' + e.message) }
+      const found = detectIssues(rows)
+      setParsedRows(rows)
+      setIssues(found)
+      setStage(found.length > 0 ? 'clarify' : 'preview')
+    } catch (e) {
+      setStatus('Error reading file: ' + e.message)
+    }
+    setLoading(false)
+    setStatus('')
+  }
+
+  async function doImport(rows) {
+    setLoading(true)
+    setStage('importing')
+    const res = await importCSVRows(rows)
+    setResults(res)
+    setStage('done')
     setLoading(false)
   }
 
-  return (
+  function applyClarifications() {
+    const updated = parsedRows.map((row, i) => ({ ...row, ...(clarifications[i] || {}) }))
+    setParsedRows(updated)
+    setStage('preview')
+  }
+
+  if (stage === 'upload') return (
     <div>
       <div className="upload-zone"
         onClick={() => document.getElementById('csv-input').click()}
@@ -42,31 +74,102 @@ function CSVMode({ onDone }) {
         <input id="csv-input" type="file" accept=".csv" style={{ display: 'none' }} onChange={e => handleFile(e.target.files[0])} />
       </div>
       {loading && <div className="loading"><div className="spinner" /> {status}</div>}
-      {results && (
-        <div className="card">
-          {results.map((r, i) => (
-            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0', borderBottom: '1px solid var(--border)', fontFamily: 'var(--mono)', fontSize: 12 }}>
-              <span style={{ color: r.status === 'ok' ? 'var(--accent3)' : 'var(--accent2)' }}>{r.status === 'ok' ? '✓' : '✗'}</span>
-              <span style={{ color: 'var(--text)' }}>{r.name}</span>
-              {r.error && <span style={{ color: 'var(--accent2)' }}>{r.error}</span>}
-            </div>
-          ))}
-          <button className="btn btn-primary" style={{ marginTop: 16 }} onClick={onDone}>View Dashboard →</button>
-        </div>
-      )}
     </div>
   )
+
+  if (stage === 'clarify') return (
+    <div>
+      <div style={{ background: 'rgba(255,209,102,0.08)', border: '1px solid rgba(255,209,102,0.3)', borderRadius: 10, padding: '14px 18px', marginBottom: 20 }}>
+        <div style={{ fontWeight: 700, color: 'var(--gold)', marginBottom: 6 }}>Some rows need clarification before importing</div>
+        <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.6 }}>
+          {issues.length} issue{issues.length > 1 ? 's were' : ' was'} found. Review and correct below, then continue.
+        </div>
+      </div>
+      {issues.map((issue, i) => (
+        <div key={i} className="card" style={{ marginBottom: 12 }}>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--gold)', marginBottom: 10 }}>{issue.msg}</div>
+          {issue.field === 'name' && (
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label className="form-label">Correct funnel name</label>
+              <input className="form-input" placeholder="e.g. WORST Song Out Now" value={clarifications[issue.row]?.name || parsedRows[issue.row]?.name || ''} onChange={e => setClarifications(c => ({ ...c, [issue.row]: { ...c[issue.row], name: e.target.value } }))} />
+            </div>
+          )}
+          {issue.field === 'version' && (
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label className="form-label">Select funnel type</label>
+              <select className="form-input" value={clarifications[issue.row]?.version || ''} onChange={e => setClarifications(c => ({ ...c, [issue.row]: { ...c[issue.row], version: e.target.value } }))}>
+                <option value="">Select type…</option>
+                {VERSIONS.map(v => <option key={v}>{v}</option>)}
+              </select>
+            </div>
+          )}
+          {issue.field === 'm1_metrics' && (
+            <div style={{ fontSize: 13, color: 'var(--muted)' }}>This row will be imported without M1 metrics. You can add them manually from the funnel detail page.</div>
+          )}
+        </div>
+      ))}
+      <div style={{ display: 'flex', gap: 12 }}>
+        <button className="btn btn-ghost" onClick={() => setStage('upload')}>Start Over</button>
+        <button className="btn btn-primary" onClick={applyClarifications}>Continue to Preview</button>
+      </div>
+    </div>
+  )
+
+  if (stage === 'preview') return (
+    <div>
+      <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 16, color: 'var(--text)' }}>
+        Preview — {parsedRows.length} funnel{parsedRows.length > 1 ? 's' : ''} ready to import
+      </div>
+      <div className="table-wrap" style={{ marginBottom: 20 }}>
+        <table>
+          <thead><tr><th>Name</th><th>Type</th><th>M1 Sent</th><th>M1 CTR</th><th>M2 Sent</th><th>Funnel CR</th></tr></thead>
+          <tbody>
+            {parsedRows.map((row, i) => (
+              <tr key={i} style={{ cursor: 'default' }}>
+                <td className="name-cell">{row.name || <span style={{ color: 'var(--accent2)' }}>Missing</span>}</td>
+                <td><span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)' }}>{row.version || '—'}</span></td>
+                <td style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{row.m1_sent?.toLocaleString() || '—'}</td>
+                <td style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{row.m1_cr != null ? Math.round(row.m1_cr * 100) + '%' : '—'}</td>
+                <td style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{row.m2_sent?.toLocaleString() || '—'}</td>
+                <td style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{row.funnel_cr != null ? Math.round(row.funnel_cr * 100) + '%' : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div style={{ display: 'flex', gap: 12 }}>
+        <button className="btn btn-ghost" onClick={() => setStage('upload')}>Start Over</button>
+        <button className="btn btn-primary" onClick={() => doImport(parsedRows)}>Import All</button>
+      </div>
+    </div>
+  )
+
+  if (stage === 'importing') return <div className="loading"><div className="spinner" /> Importing…</div>
+
+  if (stage === 'done') return (
+    <div className="card">
+      <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 14 }}>Import complete</div>
+      {results?.map((r, i) => (
+        <div key={i} style={{ display: 'flex', gap: 10, padding: '6px 0', borderBottom: '1px solid var(--border)', fontFamily: 'var(--mono)', fontSize: 12 }}>
+          <span style={{ color: r.status === 'ok' ? 'var(--accent3)' : 'var(--accent2)' }}>{r.status === 'ok' ? 'OK' : 'Error'}</span>
+          <span style={{ color: 'var(--text)' }}>{r.name}</span>
+          {r.error && <span style={{ color: 'var(--accent2)' }}>{r.error}</span>}
+        </div>
+      ))}
+      <button className="btn btn-primary" style={{ marginTop: 16 }} onClick={onDone}>View Dashboard</button>
+    </div>
+  )
+
+  return null
 }
 
 // ── NODE CANVAS ───────────────────────────────────────────────────────────────
 const NODE_TYPES = ['message', 'condition', 'goal']
-const NODE_COLORS = { message: 'var(--accent)', condition: 'var(--accent3)', goal: 'var(--gold)' }
 
 function NodeCanvas({ nodes, setNodes, edges, setEdges, selectedId, setSelectedId }) {
   const canvasRef = useRef(null)
   const dragging = useRef(null)
   const connecting = useRef(null)
-  const [mousePos, setMousePos] = useState({ x: 0, y: 0 })
 
   const getOffset = () => {
     const rect = canvasRef.current?.getBoundingClientRect()
@@ -76,20 +179,16 @@ function NodeCanvas({ nodes, setNodes, edges, setEdges, selectedId, setSelectedI
   function onMouseDown(e, nodeId) {
     e.stopPropagation()
     setSelectedId(nodeId)
-    const offset = getOffset()
+    const off = getOffset()
     const node = nodes.find(n => n.id === nodeId)
-    dragging.current = { nodeId, startX: e.clientX - offset.x - node.x, startY: e.clientY - offset.y - node.y }
+    dragging.current = { nodeId, startX: e.clientX - off.x - node.x, startY: e.clientY - off.y - node.y }
   }
 
   function onMouseMove(e) {
-    const offset = getOffset()
-    setMousePos({ x: e.clientX - offset.x, y: e.clientY - offset.y })
-    if (dragging.current) {
-      const { nodeId, startX, startY } = dragging.current
-      const x = e.clientX - offset.x - startX
-      const y = e.clientY - offset.y - startY
-      setNodes(ns => ns.map(n => n.id === nodeId ? { ...n, x, y } : n))
-    }
+    if (!dragging.current) return
+    const off = getOffset()
+    const { nodeId, startX, startY } = dragging.current
+    setNodes(ns => ns.map(n => n.id === nodeId ? { ...n, x: Math.max(0, e.clientX - off.x - startX), y: Math.max(0, e.clientY - off.y - startY) } : n))
   }
 
   function onMouseUp() { dragging.current = null; connecting.current = null }
@@ -108,55 +207,43 @@ function NodeCanvas({ nodes, setNodes, edges, setEdges, selectedId, setSelectedI
     connecting.current = null
   }
 
-  function removeEdge(from, to) {
-    setEdges(es => es.filter(e => !(e.from === from && e.to === to)))
-  }
-
-  // Draw SVG edges
   const edgePaths = edges.map((edge, i) => {
-    const fromNode = nodes.find(n => n.id === edge.from)
-    const toNode = nodes.find(n => n.id === edge.to)
-    if (!fromNode || !toNode) return null
-    const x1 = fromNode.x + 100
-    const y1 = fromNode.y + 110
-    const x2 = toNode.x + 100
-    const y2 = toNode.y
-    const color = edge.portType === 'out-yes' ? 'var(--accent3)' : edge.portType === 'out-no' ? 'var(--accent2)' : 'var(--border)'
-    const mx = (x1 + x2) / 2
+    const fn = nodes.find(n => n.id === edge.from)
+    const tn = nodes.find(n => n.id === edge.to)
+    if (!fn || !tn) return null
+    const x1 = fn.x + 100, y1 = fn.y + 110, x2 = tn.x + 100, y2 = tn.y
+    const color = edge.portType === 'out-yes' ? '#3dffa0' : edge.portType === 'out-no' ? '#fc5c7d' : '#2e2e45'
+    const my = (y1 + y2) / 2
     return (
-      <g key={i} onClick={() => removeEdge(edge.from, edge.to)} style={{ cursor: 'pointer' }}>
-        <path d={`M ${x1} ${y1} C ${x1} ${mx} ${x2} ${mx} ${x2} ${y2}`} stroke={color} strokeWidth={2} fill="none" />
-        <text x={mx} y={(y1 + y2) / 2} fill={color} fontSize={10} textAnchor="middle" fontFamily="var(--mono)" style={{ pointerEvents: 'none' }}>{edge.label}</text>
+      <g key={i} onClick={() => setEdges(es => es.filter(e => !(e.from === edge.from && e.to === edge.to)))} style={{ cursor: 'pointer' }}>
+        <path d={`M ${x1} ${y1} C ${x1} ${my} ${x2} ${my} ${x2} ${y2}`} stroke={color} strokeWidth={2} fill="none" />
+        <text x={(x1+x2)/2} y={my} fill={color} fontSize={10} textAnchor="middle" fontFamily="var(--mono)" style={{ pointerEvents: 'none' }}>{edge.label}</text>
       </g>
     )
   })
 
   return (
-    <div ref={canvasRef} className="canvas-area"
-      onMouseMove={onMouseMove} onMouseUp={onMouseUp}
-      onClick={() => setSelectedId(null)}>
+    <div ref={canvasRef} className="canvas-area" onMouseMove={onMouseMove} onMouseUp={onMouseUp} onClick={() => setSelectedId(null)}>
       <svg className="canvas-edge">{edgePaths}</svg>
-      {nodes.map(node => (
-        <div key={node.id}
-          className={'node' + (selectedId === node.id ? ' selected' : '') + (node.type === 'condition' ? ' condition-node' : '')}
-          style={{ left: node.x, top: node.y, borderColor: selectedId === node.id ? NODE_COLORS[node.type] : undefined }}
-          onMouseDown={e => onMouseDown(e, node.id)}>
-          <div className="node-label">{node.type.toUpperCase()}</div>
-          <div className="node-title">{node.label || `Node ${node.id}`}</div>
-          {node.message_text && <div className="node-msg" style={{ fontSize: 10 }}>{node.message_text.slice(0, 60)}{node.message_text.length > 60 ? '…' : ''}</div>}
-          {/* Port for input */}
-          <div className="node-port in" onMouseUp={e => endConnect(e, node.id)} />
-          {/* Output port(s) */}
-          {node.type === 'condition' ? (
-            <>
-              <div className="node-port out-yes" onMouseDown={e => startConnect(e, node.id, 'out-yes')} title="Yes path" />
-              <div className="node-port out-no" onMouseDown={e => startConnect(e, node.id, 'out-no')} title="No path" />
-            </>
-          ) : (
-            <div className="node-port out" onMouseDown={e => startConnect(e, node.id, 'out')} />
-          )}
-        </div>
-      ))}
+      {nodes.map(node => {
+        const bc = node.type === 'condition' ? 'rgba(61,255,160,0.5)' : node.type === 'goal' ? 'rgba(255,209,102,0.5)' : 'var(--border)'
+        return (
+          <div key={node.id} className={'node' + (selectedId === node.id ? ' selected' : '')}
+            style={{ left: node.x, top: node.y, borderColor: selectedId === node.id ? 'var(--accent)' : bc }}
+            onMouseDown={e => onMouseDown(e, node.id)}>
+            <div className="node-label" style={{ color: node.type === 'condition' ? '#3dffa0' : node.type === 'goal' ? '#ffd166' : 'var(--muted)' }}>{node.type.toUpperCase()}</div>
+            <div className="node-title">{node.label || `Node ${node.id}`}</div>
+            {node.message_text && <div className="node-msg">{node.message_text.slice(0,55)}{node.message_text.length > 55 ? '…' : ''}</div>}
+            <div className="node-port in" onMouseUp={e => endConnect(e, node.id)} />
+            {node.type === 'condition' ? (
+              <>
+                <div className="node-port out-yes" onMouseDown={e => startConnect(e, node.id, 'out-yes')} title="Yes path" />
+                <div className="node-port out-no" onMouseDown={e => startConnect(e, node.id, 'out-no')} title="No path" />
+              </>
+            ) : <div className="node-port out" onMouseDown={e => startConnect(e, node.id, 'out')} />}
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -166,90 +253,50 @@ function ManualMode({ onDone }) {
   const [step, setStep] = useState(1)
   const [funnel, setFunnel] = useState({ name: '', version: 'Song Out Now', keywords: '' })
   const [funnelId, setFunnelId] = useState(null)
-  const [nodes, setNodes] = useState([
-    { id: 1, type: 'message', label: 'M1', message_text: '', cta_text: '', x: 40, y: 60, sent: '', opened: '', clicked: '' }
-  ])
+  const [nodes, setNodes] = useState([{ id: 1, type: 'message', label: 'M1', message_text: '', cta_text: '', x: 40, y: 60, sent: '', opened: '', clicked: '' }])
   const [edges, setEdges] = useState([])
   const [selectedId, setSelectedId] = useState(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const nextId = useRef(2)
-
   const selectedNode = nodes.find(n => n.id === selectedId)
 
   function addNode(type) {
     const id = nextId.current++
-    const msgNodes = nodes.filter(n => n.type === 'message')
-    const label = type === 'message' ? `M${msgNodes.length + 1}` : type === 'condition' ? 'Condition' : 'Goal'
-    setNodes(ns => [...ns, { id, type, label, message_text: '', cta_text: '', x: 260 + (ns.length * 20), y: 60 + (ns.length * 20), sent: '', opened: '', clicked: '' }])
+    const msgCount = nodes.filter(n => n.type === 'message').length
+    const label = type === 'message' ? `M${msgCount + 1}` : type === 'condition' ? 'Condition' : 'Goal'
+    setNodes(ns => [...ns, { id, type, label, message_text: '', cta_text: '', x: 60 + ns.length * 30, y: 80 + ns.length * 15, sent: '', opened: '', clicked: '' }])
   }
 
-  function updateNode(id, field, val) {
-    setNodes(ns => ns.map(n => n.id === id ? { ...n, [field]: val } : n))
-  }
-
-  function removeNode(id) {
-    setNodes(ns => ns.filter(n => n.id !== id))
-    setEdges(es => es.filter(e => e.from !== id && e.to !== id))
-    setSelectedId(null)
-  }
+  function updateNode(id, field, val) { setNodes(ns => ns.map(n => n.id === id ? { ...n, [field]: val } : n)) }
+  function removeNode(id) { setNodes(ns => ns.filter(n => n.id !== id)); setEdges(es => es.filter(e => e.from !== id && e.to !== id)); setSelectedId(null) }
 
   async function saveFunnel(e) {
-    e.preventDefault()
-    setSaving(true)
-    setError('')
+    e.preventDefault(); setSaving(true); setError('')
     try {
       const kws = funnel.keywords.split(',').map(k => k.trim()).filter(Boolean)
       const f = await createFunnel({ name: funnel.name, version: funnel.version, keywords: kws })
-      setFunnelId(f.id)
-      setStep(2)
+      setFunnelId(f.id); setStep(2)
     } catch (e) { setError(e.message) }
     setSaving(false)
   }
 
   async function saveSteps(e) {
-    e.preventDefault()
-    setSaving(true)
-    setError('')
+    e.preventDefault(); setSaving(true); setError('')
     try {
-      // Order message nodes by x position
       const msgNodes = nodes.filter(n => n.type === 'message').sort((a, b) => a.x - b.x)
       for (let i = 0; i < msgNodes.length; i++) {
         const node = msgNodes[i]
-        const created = await upsertStep({
-          funnel_id: funnelId,
-          step_order: i + 1,
-          label: node.label || `M${i + 1}`,
-          step_type: 'message',
-          message_text: node.message_text || null,
-          cta_text: node.cta_text || null,
-        })
+        const created = await upsertStep({ funnel_id: funnelId, step_order: i + 1, label: node.label || `M${i+1}`, step_type: 'message', message_text: node.message_text || null, cta_text: node.cta_text || null })
         if (node.sent || node.clicked) {
-          await upsertMetric({
-            step_id: created.id,
-            sent: node.sent ? parseInt(node.sent) : null,
-            opened: node.opened ? parseInt(node.opened) : null,
-            clicked: node.clicked ? parseInt(node.clicked) : null,
-          })
+          await upsertMetric({ step_id: created.id, sent: node.sent ? parseInt(node.sent) : null, opened: node.opened ? parseInt(node.opened) : null, clicked: node.clicked ? parseInt(node.clicked) : null })
         }
       }
-      // Save goal node if exists
       const goalNode = nodes.find(n => n.type === 'goal')
       if (goalNode) {
-        const created = await upsertStep({
-          funnel_id: funnelId,
-          step_order: msgNodes.length + 1,
-          label: 'Goal',
-          step_type: 'goal',
-          message_text: null,
-          cta_text: null,
-        })
+        const created = await upsertStep({ funnel_id: funnelId, step_order: msgNodes.length + 1, label: 'Goal', step_type: 'goal', message_text: null, cta_text: null })
         if (goalNode.sent || goalNode.clicked) {
-          await upsertMetric({
-            step_id: created.id,
-            sent: goalNode.sent ? parseInt(goalNode.sent) : null,
-            clicked: goalNode.clicked ? parseInt(goalNode.clicked) : null,
-          })
+          await upsertMetric({ step_id: created.id, sent: goalNode.sent ? parseInt(goalNode.sent) : null, clicked: goalNode.clicked ? parseInt(goalNode.clicked) : null })
         }
       }
       onDone(funnelId)
@@ -261,7 +308,7 @@ function ManualMode({ onDone }) {
     <form onSubmit={saveFunnel}>
       <div className="form-row">
         <div className="form-group">
-          <label className="form-label">Funnel Name *</label>
+          <label className="form-label">Funnel Name</label>
           <input className="form-input" placeholder="e.g. New Follower Automation, WORST Song Out Now" value={funnel.name} onChange={e => setFunnel(f => ({ ...f, name: e.target.value }))} required />
         </div>
         <div className="form-group">
@@ -276,31 +323,24 @@ function ManualMode({ onDone }) {
         <input className="form-input" placeholder="e.g. WORST, SONG, MUSIC" value={funnel.keywords} onChange={e => setFunnel(f => ({ ...f, keywords: e.target.value }))} />
       </div>
       {error && <div className="error-msg">{error}</div>}
-      <button className="btn btn-primary" type="submit" disabled={saving}>
-        {saving ? <><span className="spinner" /> Saving…</> : 'Next — Build Flow →'}
-      </button>
+      <button className="btn btn-primary" type="submit" disabled={saving}>{saving ? <><span className="spinner" /> Saving…</> : 'Next — Build Flow'}</button>
     </form>
   )
 
   return (
     <form onSubmit={saveSteps}>
-      <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={() => addNode('message')}>＋ Message Node</button>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={() => addNode('condition')}>＋ Condition Node</button>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={() => addNode('goal')}>＋ Goal Node</button>
-        <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', alignSelf: 'center' }}>
-          Drag nodes to position · Drag from bottom port to connect · Click an edge to remove it
-        </div>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => addNode('message')}>+ Message</button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => addNode('condition')}>+ Condition</button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => addNode('goal')}>+ Goal</button>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)' }}>Drag nodes to position — drag bottom dot to connect — click an edge to remove</span>
       </div>
-
       <NodeCanvas nodes={nodes} setNodes={setNodes} edges={edges} setEdges={setEdges} selectedId={selectedId} setSelectedId={setSelectedId} />
-
-      {/* Node editor panel */}
       {selectedNode && (
         <div className="card" style={{ marginTop: 16 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-            <div className="card-title" style={{ marginBottom: 0 }}>Edit: {selectedNode.label}</div>
-            <button type="button" className="btn btn-danger btn-sm" onClick={() => removeNode(selectedNode.id)}>Remove Node</button>
+            <div className="card-title" style={{ marginBottom: 0 }}>Editing: {selectedNode.label}</div>
+            <button type="button" className="btn btn-danger btn-sm" onClick={() => removeNode(selectedNode.id)}>Remove</button>
           </div>
           <div className="form-row">
             <div className="form-group">
@@ -318,11 +358,11 @@ function ManualMode({ onDone }) {
             <>
               <div className="form-group">
                 <label className="form-label">Message Copy</label>
-                <textarea className="form-input" value={selectedNode.message_text} onChange={e => updateNode(selectedNode.id, 'message_text', e.target.value)} placeholder="The DM text subscribers receive…" />
+                <textarea className="form-input" value={selectedNode.message_text} onChange={e => updateNode(selectedNode.id, 'message_text', e.target.value)} placeholder="The DM text subscribers receive" />
               </div>
               <div className="form-group">
                 <label className="form-label">CTA Button Text</label>
-                <input className="form-input" value={selectedNode.cta_text} onChange={e => updateNode(selectedNode.id, 'cta_text', e.target.value)} placeholder="e.g. get the song, listen now" />
+                <input className="form-input" value={selectedNode.cta_text} onChange={e => updateNode(selectedNode.id, 'cta_text', e.target.value)} placeholder="e.g. get the song, listen now, join discord" />
               </div>
               <div className="form-row-3">
                 {['sent', 'opened', 'clicked'].map(field => (
@@ -336,13 +376,10 @@ function ManualMode({ onDone }) {
           )}
         </div>
       )}
-
       {error && <div className="error-msg">{error}</div>}
       <div style={{ display: 'flex', gap: 12, marginTop: 16 }}>
-        <button type="button" className="btn btn-ghost" onClick={() => setStep(1)}>← Back</button>
-        <button className="btn btn-primary" type="submit" disabled={saving}>
-          {saving ? <><span className="spinner" /> Saving…</> : 'Save Funnel ✓'}
-        </button>
+        <button type="button" className="btn btn-ghost" onClick={() => setStep(1)}>Back</button>
+        <button className="btn btn-primary" type="submit" disabled={saving}>{saving ? <><span className="spinner" /> Saving…</> : 'Save Funnel'}</button>
       </div>
     </form>
   )
@@ -353,10 +390,11 @@ function ScreenshotMode({ onDone }) {
   const [funnelName, setFunnelName] = useState('')
   const [funnelVersion, setFunnelVersion] = useState('Song Out Now')
   const [files, setFiles] = useState([])
-  const [status, setStatus] = useState('')
-  const [result, setResult] = useState(null)
-  const [loading, setLoading] = useState(false)
+  const [stage, setStage] = useState('upload')
+  const [parsed, setParsed] = useState(null)
+  const [flagged, setFlagged] = useState({})
   const [funnelId, setFunnelId] = useState(null)
+  const [error, setError] = useState('')
 
   async function fileToBase64(file) {
     return new Promise((resolve, reject) => {
@@ -367,66 +405,58 @@ function ScreenshotMode({ onDone }) {
     })
   }
 
-  async function handleSubmit(e) {
+  async function handleParse(e) {
     e.preventDefault()
     if (files.length === 0 || !funnelName) return
-    setLoading(true)
-    setStatus('Creating funnel…')
+    setStage('parsing')
+    setError('')
+    try {
+      const images = await Promise.all(files.map(async f => ({
+        base64: await fileToBase64(f),
+        type: f.type || 'image/png',
+      })))
+
+      const resp = await fetch('/.netlify/functions/parse-screenshot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ images })
+      })
+
+      const result = await resp.json()
+
+      if (result.error && !result.steps?.length) {
+        setError('Parse failed: ' + result.error)
+        setStage('upload')
+        return
+      }
+
+      setParsed(result)
+      setStage('confirm')
+    } catch (err) {
+      setError('Error: ' + err.message)
+      setStage('upload')
+    }
+  }
+
+  async function handleSave() {
+    setStage('saving')
     try {
       const f = await createFunnel({ name: funnelName, version: funnelVersion })
       setFunnelId(f.id)
-
-      // Process each image and combine results
-      let allSteps = []
-      let allConnections = []
-      let stepOffset = 0
-
-      for (let i = 0; i < files.length; i++) {
-        setStatus(`Analyzing image ${i + 1} of ${files.length} with Claude Vision…`)
-        const base64 = await fileToBase64(files[i])
-        const imageType = files[i].type || 'image/png'
-
-        const resp = await fetch('/.netlify/functions/parse-screenshot', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image_base64: base64, image_type: imageType })
-        })
-
-        const parsed = await resp.json()
-        if (parsed.error && !parsed.steps?.length) {
-          setStatus(`Warning: Image ${i + 1} returned an error — ${parsed.error}`)
-          continue
-        }
-
-        // Offset step orders for subsequent images
-        const offsetSteps = (parsed.steps || []).map(s => ({ ...s, order: s.order + stepOffset }))
-        const offsetConns = (parsed.connections || []).map(c => ({ ...c, from_order: c.from_order + stepOffset, to_order: c.to_order + stepOffset }))
-
-        allSteps = [...allSteps, ...offsetSteps]
-        allConnections = [...allConnections, ...offsetConns]
-        stepOffset += (parsed.steps || []).length
-      }
-
-      // Deduplicate by order (in case images overlap)
-      const seen = new Set()
-      allSteps = allSteps.filter(s => { if (seen.has(s.order)) return false; seen.add(s.order); return true })
-
-      setStatus('Saving to database…')
-      await saveScreenshotSteps(f.id, allSteps)
-
-      setResult({ steps: allSteps, connections: allConnections, funnel_notes: `Parsed from ${files.length} image(s)` })
-      setStatus('Done!')
+      const stepsToSave = (parsed.steps || []).filter((_, i) => !flagged[i])
+      await saveScreenshotSteps(f.id, stepsToSave)
+      setStage('done')
     } catch (err) {
-      setStatus('Error: ' + err.message)
+      setError('Save failed: ' + err.message)
+      setStage('confirm')
     }
-    setLoading(false)
   }
 
-  return (
-    <form onSubmit={handleSubmit}>
+  if (stage === 'upload') return (
+    <form onSubmit={handleParse}>
       <div className="form-row" style={{ marginBottom: 16 }}>
         <div className="form-group">
-          <label className="form-label">Funnel Name *</label>
+          <label className="form-label">Funnel Name</label>
           <input className="form-input" value={funnelName} onChange={e => setFunnelName(e.target.value)} placeholder="e.g. WORST Song Out Now" required />
         </div>
         <div className="form-group">
@@ -436,78 +466,103 @@ function ScreenshotMode({ onDone }) {
           </select>
         </div>
       </div>
-
       <div className="upload-zone" style={{ marginBottom: 16 }}
         onClick={() => document.getElementById('ss-input').click()}
         onDragOver={e => { e.preventDefault(); e.currentTarget.classList.add('over') }}
         onDragLeave={e => e.currentTarget.classList.remove('over')}
         onDrop={e => { e.preventDefault(); e.currentTarget.classList.remove('over'); setFiles(Array.from(e.dataTransfer.files)) }}>
-        <div style={{ fontSize: 32, marginBottom: 8 }}>{files.length > 0 ? '✅' : '🖼️'}</div>
-        <div className="upload-title">{files.length > 0 ? `${files.length} image(s) selected` : 'Drop ManyChat screenshots here'}</div>
-        <div className="upload-sub">PNG, JPG, WEBP · You can upload multiple images if your flow is wide</div>
+        <div style={{ fontSize: 32, marginBottom: 8 }}>{files.length > 0 ? '✓' : '🖼️'}</div>
+        <div className="upload-title">{files.length > 0 ? `${files.length} image${files.length > 1 ? 's' : ''} selected` : 'Drop ManyChat screenshots here'}</div>
+        <div className="upload-sub">PNG, JPG, WEBP — upload multiple images if your flow is wide</div>
         <input id="ss-input" type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={e => setFiles(Array.from(e.target.files))} />
       </div>
-
-      {files.length > 0 && (
-        <div style={{ marginBottom: 12 }}>
-          {files.map((f, i) => (
-            <div key={i} style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', padding: '3px 0' }}>
-              📄 {f.name}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {loading && <div className="loading"><div className="spinner" /> {status}</div>}
-
-      {result && !loading && (
-        <div className="card" style={{ marginBottom: 16, borderColor: 'rgba(61,255,160,0.3)' }}>
-          <div style={{ color: 'var(--accent3)', fontWeight: 700, marginBottom: 8 }}>
-            ✓ Parsed {result.steps?.length || 0} message steps
-          </div>
-          {result.steps?.map((s, i) => (
-            <div key={i} style={{ padding: '6px 0', borderBottom: '1px solid var(--border)', fontFamily: 'var(--mono)', fontSize: 11 }}>
-              <span style={{ color: 'var(--accent)' }}>{s.label}</span>
-              <span style={{ color: 'var(--muted)', margin: '0 8px' }}>·</span>
-              <span style={{ color: 'var(--text)' }}>sent: {s.sent || '?'}</span>
-              <span style={{ color: 'var(--muted)', margin: '0 8px' }}>·</span>
-              <span style={{ color: 'var(--accent3)' }}>CTR: {s.ctr_raw ? Math.round(s.ctr_raw * 100) + '%' : '?'}</span>
-              {s.cta_text && <span style={{ color: 'var(--gold)', marginLeft: 8 }}>CTA: "{s.cta_text}"</span>}
-            </div>
-          ))}
-          {result.funnel_notes && <div style={{ marginTop: 10, color: 'var(--muted)', fontSize: 12 }}>{result.funnel_notes}</div>}
-          <button type="button" className="btn btn-primary" style={{ marginTop: 14 }} onClick={() => onDone(funnelId)}>View Funnel →</button>
-        </div>
-      )}
-
-      {!loading && !result && (
-        <button className="btn btn-primary" type="submit" disabled={files.length === 0 || !funnelName}>
-          ✦ Analyze Screenshot{files.length > 1 ? 's' : ''}
-        </button>
-      )}
+      {files.length > 0 && files.map((f, i) => (
+        <div key={i} style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', padding: '2px 0' }}>{f.name}</div>
+      ))}
+      {error && <div className="error-msg" style={{ margin: '12px 0' }}>{error}</div>}
+      <button className="btn btn-primary" type="submit" style={{ marginTop: 12 }} disabled={files.length === 0 || !funnelName}>
+        Analyze Screenshot{files.length > 1 ? 's' : ''}
+      </button>
     </form>
   )
+
+  if (stage === 'parsing') return (
+    <div className="loading"><div className="spinner" /> Analyzing with Claude Vision — this takes 15–25 seconds for complex flows…</div>
+  )
+
+  if (stage === 'confirm') return (
+    <div>
+      <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 6, color: 'var(--text)' }}>
+        Review parsed steps — {parsed?.steps?.length || 0} message steps found
+      </div>
+      <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', marginBottom: 20 }}>
+        Check each step below. Flag anything that looks wrong — flagged steps will be excluded from the import. You can add corrected data manually afterwards.
+      </div>
+      {parsed?.funnel_notes && (
+        <div style={{ background: 'rgba(124,92,252,0.07)', border: '1px solid rgba(124,92,252,0.2)', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 13, color: 'var(--text)' }}>
+          {parsed.funnel_notes}
+        </div>
+      )}
+      {(parsed?.steps || []).map((step, i) => (
+        <div key={i} className="card" style={{ marginBottom: 12, borderColor: flagged[i] ? 'rgba(252,92,125,0.4)' : 'var(--border)', opacity: flagged[i] ? 0.55 : 1 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
+            <div>
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--accent)', fontWeight: 700 }}>{step.label}</span>
+              {step.cta_text && <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--gold)', marginLeft: 12 }}>CTA: "{step.cta_text}"</span>}
+            </div>
+            <button className={'btn btn-sm ' + (flagged[i] ? 'btn-ghost' : 'btn-danger')} onClick={() => setFlagged(f => ({ ...f, [i]: !f[i] }))}>
+              {flagged[i] ? 'Unflag' : 'Flag as wrong'}
+            </button>
+          </div>
+          {step.message_text && (
+            <div style={{ fontSize: 12, fontStyle: 'italic', color: 'var(--muted)', borderLeft: '2px solid var(--border)', paddingLeft: 10, marginBottom: 10, lineHeight: 1.5 }}>
+              "{step.message_text}"
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 20, fontFamily: 'var(--mono)', fontSize: 11 }}>
+            <span>Sent: <strong style={{ color: 'var(--text)' }}>{step.sent?.toLocaleString() || '—'}</strong></span>
+            <span>Opened: <strong style={{ color: 'var(--text)' }}>{step.opened?.toLocaleString() || '—'}</strong></span>
+            <span>Clicked: <strong style={{ color: 'var(--text)' }}>{step.clicked?.toLocaleString() || '—'}</strong></span>
+            <span>CTR: <strong style={{ color: 'var(--accent3)' }}>{step.ctr_raw != null ? Math.round(step.ctr_raw * 100) + '%' : '—'}</strong></span>
+          </div>
+          {step.notes && <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--muted)', marginTop: 8 }}>{step.notes}</div>}
+        </div>
+      ))}
+      {error && <div className="error-msg" style={{ marginBottom: 12 }}>{error}</div>}
+      <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
+        <button className="btn btn-ghost" onClick={() => { setStage('upload'); setParsed(null); setFlagged({}) }}>Re-upload</button>
+        <button className="btn btn-primary" onClick={handleSave}>
+          Save {Object.values(flagged).filter(Boolean).length > 0
+            ? `(${(parsed?.steps?.length || 0) - Object.values(flagged).filter(Boolean).length} of ${parsed?.steps?.length} steps)`
+            : 'All Steps'}
+        </button>
+      </div>
+    </div>
+  )
+
+  if (stage === 'saving') return <div className="loading"><div className="spinner" /> Saving to database…</div>
+
+  if (stage === 'done') return (
+    <div className="card" style={{ borderColor: 'rgba(61,255,160,0.3)' }}>
+      <div style={{ color: 'var(--accent3)', fontWeight: 700, marginBottom: 12 }}>Funnel saved successfully</div>
+      <button className="btn btn-primary" onClick={() => onDone(funnelId)}>View Funnel</button>
+    </div>
+  )
+
+  return null
 }
 
 // ── MAIN PAGE ─────────────────────────────────────────────────────────────────
 export default function NewFunnel() {
   const [mode, setMode] = useState(null)
   const navigate = useNavigate()
-
-  function onDone(funnelId) {
-    if (funnelId) navigate(`/funnels/${funnelId}`)
-    else navigate('/')
-  }
+  function onDone(funnelId) { if (funnelId) navigate(`/funnels/${funnelId}`); else navigate('/') }
 
   return (
     <div>
       <div className="page-header">
-        <div>
-          <div className="page-title">Add Funnel ＋</div>
-          <div className="page-subtitle">Choose how you want to add your funnel data</div>
-        </div>
+        <div><div className="page-title">Add Funnel</div><div className="page-subtitle">Choose how you want to add your funnel data</div></div>
       </div>
-
       {!mode ? (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, maxWidth: 800 }}>
           {MODES.map(m => (
@@ -523,7 +578,7 @@ export default function NewFunnel() {
         </div>
       ) : (
         <div style={{ maxWidth: 860 }}>
-          <button className="btn btn-ghost btn-sm" style={{ marginBottom: 24 }} onClick={() => setMode(null)}>← Choose different method</button>
+          <button className="btn btn-ghost btn-sm" style={{ marginBottom: 24 }} onClick={() => setMode(null)}>Back</button>
           <div className="card">
             <div className="card-title">{MODES.find(m => m.id === mode)?.icon} {MODES.find(m => m.id === mode)?.label}</div>
             {mode === 'csv' && <CSVMode onDone={() => navigate('/')} />}

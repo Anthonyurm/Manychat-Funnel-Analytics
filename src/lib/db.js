@@ -37,11 +37,7 @@ export async function createFunnel({ name, version = 'Song Out Now', notes = '',
 
 export async function updateFunnel(id, fields) {
   const { data, error } = await supabase
-    .from('funnels')
-    .update(fields)
-    .eq('id', id)
-    .select()
-    .single()
+    .from('funnels').update(fields).eq('id', id).select().single()
   if (error) throw error
   return data
 }
@@ -56,19 +52,14 @@ export async function upsertStep({ funnel_id, step_order, label, step_type, mess
   const { data, error } = await supabase
     .from('steps')
     .insert({ funnel_id, step_order, label, step_type, message_text, cta_text, user_id: user.id })
-    .select()
-    .single()
+    .select().single()
   if (error) throw error
   return data
 }
 
 export async function updateStep(id, fields) {
   const { data, error } = await supabase
-    .from('steps')
-    .update(fields)
-    .eq('id', id)
-    .select()
-    .single()
+    .from('steps').update(fields).eq('id', id).select().single()
   if (error) throw error
   return data
 }
@@ -86,8 +77,7 @@ export async function upsertMetric({ step_id, sent, opened, clicked, source = 'm
   const { data, error } = await supabase
     .from('step_metrics')
     .insert({ step_id, sent, opened, clicked, ctr, open_rate, source, user_id: user.id })
-    .select()
-    .single()
+    .select().single()
   if (error) throw error
   return data
 }
@@ -170,23 +160,6 @@ export async function importCSVRows(rows) {
   return results
 }
 
-export async function uploadScreenshot(funnelId, file) {
-  const { data: { user } } = await supabase.auth.getUser()
-  const path = `${user.id}/${funnelId}/${Date.now()}_${file.name}`
-  const { error: uploadErr } = await supabase.storage.from('screenshots').upload(path, file)
-  if (uploadErr) throw uploadErr
-  const { data: ss } = await supabase.from('screenshots')
-    .insert({ funnel_id: funnelId, user_id: user.id, file_path: path, parse_status: 'pending' })
-    .select().single()
-  return { screenshotId: ss.id, path }
-}
-
-export async function updateScreenshotResult(id, { raw_json, parse_status }) {
-  await supabase.from('screenshots')
-    .update({ raw_json: JSON.stringify(raw_json), parse_status, parsed_at: new Date().toISOString() })
-    .eq('id', id)
-}
-
 export async function saveScreenshotSteps(funnelId, parsedSteps) {
   const { data: { user } } = await supabase.auth.getUser()
   const { data: existingSteps } = await supabase.from('steps').select('id').eq('funnel_id', funnelId)
@@ -224,6 +197,29 @@ export async function saveScreenshotSteps(funnelId, parsedSteps) {
   }
 }
 
+// ── EFFECTIVE SENT CALCULATION ────────────────────────────────────────────────
+// If M2 sent < 70% of expected (M1 sent × M1 CTR), the funnel was updated
+// mid-run. Reverse-engineer the true cohort: effectiveSent = M2 sent / M1 CTR
+// This applies to any consecutive step pair, not just M1→M2.
+export function computeEffectiveSent(msgSteps) {
+  if (!msgSteps.length) return null
+  const m1m = msgSteps[0]?.step_metrics?.[0]
+  if (!m1m?.sent || !m1m?.ctr) return m1m?.sent || null
+
+  if (msgSteps.length >= 2) {
+    const m2m = msgSteps[1]?.step_metrics?.[0]
+    if (m2m?.sent) {
+      const expectedM2 = m1m.sent * m1m.ctr
+      const ratio = m2m.sent / expectedM2
+      if (ratio < 0.7) {
+        // Funnel updated mid-run — reverse-engineer true cohort
+        return Math.round(m2m.sent / m1m.ctr)
+      }
+    }
+  }
+  return m1m.sent
+}
+
 export function computeOverview(funnels) {
   const rows = funnels.map(f => {
     const steps = f.steps || []
@@ -231,29 +227,12 @@ export function computeOverview(funnels) {
       .filter(s => s.step_type !== 'goal')
       .sort((a, b) => a.step_order - b.step_order)
     const goalStep = steps.find(s => s.step_type === 'goal')
-    const m1 = msgSteps[0]
-    const m1m = m1?.step_metrics?.[0]
+    const m1m = msgSteps[0]?.step_metrics?.[0]
     const gm = goalStep?.step_metrics?.[0]
 
-    // Effective sent: if M2 sent < 70% of expected (M1 sent x M1 CTR),
-    // the funnel was updated mid-run — reverse-engineer true cohort from M2 sent / M1 CTR
-    let effectiveSent = m1m?.sent || null
-    const m1Ctr = m1m?.ctr
+    const effectiveSent = computeEffectiveSent(msgSteps)
 
-    if (msgSteps.length >= 2 && m1m?.sent && m1Ctr) {
-      const m2 = msgSteps[1]
-      const m2m = m2?.step_metrics?.[0]
-      if (m2m?.sent) {
-        const expectedM2 = m1m.sent * m1Ctr
-        const ratio = m2m.sent / expectedM2
-        if (ratio < 0.7) {
-          // Funnel was updated — reverse-engineer true cohort
-          effectiveSent = Math.round(m2m.sent / m1Ctr)
-        }
-      }
-    }
-
-    // Build per-step metrics
+    // Per-step metrics
     const stepMetrics = {}
     msgSteps.forEach((s, i) => {
       const sm = s.step_metrics?.[0]
@@ -263,14 +242,14 @@ export function computeOverview(funnels) {
       stepMetrics[`${key}_sent`] = sm?.sent || null
       stepMetrics[`${key}_message`] = s.message_text || null
       stepMetrics[`${key}_cta`] = s.cta_text || null
-      // Reach rate: what % of the true cohort made it to this step
+      // Reach rate: % of true cohort who made it to this step
       stepMetrics[`${key}_reach_pct`] = sm?.sent && effectiveSent
         ? +(sm.sent / effectiveSent * 100).toFixed(1) : null
     })
 
-    // Funnel CR: goal clicks / effective sent, or last step clicks / effective sent
-    const goalClicks = gm?.clicked
+    // Funnel CR uses effective sent as denominator
     let funnelCr = null
+    const goalClicks = gm?.clicked
     if (goalClicks && effectiveSent) {
       funnelCr = goalClicks / effectiveSent
     } else if (gm?.ctr) {
@@ -278,9 +257,7 @@ export function computeOverview(funnels) {
     } else {
       const lastMsg = [...msgSteps].reverse().find(s => s.step_metrics?.[0]?.clicked)
       const lastClicks = lastMsg?.step_metrics?.[0]?.clicked
-      if (lastClicks && effectiveSent) {
-        funnelCr = lastClicks / effectiveSent
-      }
+      if (lastClicks && effectiveSent) funnelCr = lastClicks / effectiveSent
     }
 
     return {

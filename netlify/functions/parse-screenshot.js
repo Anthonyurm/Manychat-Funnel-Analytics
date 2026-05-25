@@ -1,7 +1,5 @@
 exports.config = {
-  bodyParser: {
-    sizeLimit: '20mb'
-  }
+  bodyParser: { sizeLimit: '20mb' }
 }
 
 exports.handler = async (event) => {
@@ -19,10 +17,14 @@ exports.handler = async (event) => {
   }
 
   try {
-    const body = event.isBase64Encoded ? Buffer.from(event.body, 'base64').toString() : event.body
-    const { images } = JSON.parse(body)
+    const body = event.isBase64Encoded
+      ? Buffer.from(event.body, 'base64').toString()
+      : event.body
 
-    if (!images || images.length === 0) {
+    const parsed = JSON.parse(body)
+    const images = parsed.images || []
+
+    if (images.length === 0) {
       return {
         statusCode: 400,
         headers: { 'Content-Type': 'application/json' },
@@ -30,46 +32,49 @@ exports.handler = async (event) => {
       }
     }
 
-    const content = []
-    images.forEach((img) => {
-      content.push({
-        type: 'image',
-        source: { type: 'base64', media_type: img.type || 'image/png', data: img.base64 }
-      })
-    })
+    // Build content array — all images first, then one instruction block
+    const content = images.map(img => ({
+      type: 'image',
+      source: {
+        type: 'base64',
+        media_type: img.type || 'image/png',
+        data: img.base64,
+      }
+    }))
 
     content.push({
       type: 'text',
-      text: `You are analyzing ${images.length > 1 ? images.length + ' ManyChat flow builder screenshots that together show one complete funnel' : 'a ManyChat flow builder screenshot'}. Read all images as one continuous flow from left to right.
+      text: `You are analyzing ${images.length > 1 ? images.length + ' ManyChat flow builder screenshots showing one complete funnel' : 'a ManyChat flow builder screenshot'}. Treat all images as one continuous flow reading left to right.
 
-RULES FOR EXTRACTION:
-1. Only extract MESSAGE nodes (Instagram Send Message nodes). Ignore completely: Condition nodes, Action nodes, Smart Delay nodes, trigger nodes, external request nodes, waiting nodes.
-2. Follow the majority path at every branch - follow the path with the higher Sent count.
-3. For each message node extract: full message body text, CTA button text if visible, and metrics (Sent, Opened, Clicked counts).
-4. Ignore follow-up check-in messages with very low sent counts (less than 20% of previous step sent count).
-5. Number messages M1, M2, M3 etc following majority flow path left to right and top to bottom.
-6. Calculate ctr_raw as clicked divided by sent. Calculate open_rate_raw as opened divided by sent.
-7. Convert percentages like 56.7% to decimals like 0.567.
+EXTRACTION RULES — follow exactly:
+1. ONLY extract Instagram "Send Message" nodes. SKIP everything else: Condition, Action, Smart Delay, When/trigger, External Request, Waiting nodes.
+2. At every conditional branch, follow the path with the HIGHER Sent count (majority path).
+3. From each Send Message node extract: full message body text, CTA button text (or null), and raw numbers for Sent, Opened, Clicked.
+4. SKIP any message node where Sent is less than 20% of the previous message node's Sent — these are check-in messages on minority paths.
+5. Label messages M1, M2, M3 etc in the order they appear following the majority path.
+6. Compute ctr_raw = Clicked / Sent. Compute open_rate_raw = Opened / Sent. Convert percentages to decimals (56.7% becomes 0.567).
 
-Return ONLY valid JSON with no markdown fences:
+Return ONLY this exact JSON structure, no markdown, no explanation:
 {
   "steps": [
     {
       "order": 1,
       "label": "M1",
       "type": "message",
-      "message_text": "full DM text",
-      "cta_text": "button text or null",
+      "message_text": "exact message copy from node",
+      "cta_text": "button label or null",
       "sent": 637,
-      "opened": 432,
+      "opened": 431,
       "clicked": 361,
       "ctr_raw": 0.567,
       "open_rate_raw": 0.678,
-      "notes": "observation"
+      "notes": ""
     }
   ],
-  "connections": [{ "from_order": 1, "to_order": 2, "label": "clicked" }],
-  "funnel_notes": "brief description"
+  "connections": [
+    { "from_order": 1, "to_order": 2, "label": "clicked" }
+  ],
+  "funnel_notes": "summary of flow and which branches were followed"
 }`
     })
 
@@ -80,24 +85,53 @@ Return ONLY valid JSON with no markdown fences:
         'x-api-key': apiKey,
         'anthropic-version': '2023-06-01',
       },
-      body: JSON.stringify({ model: 'claude-opus-4-5', max_tokens: 3000, messages: [{ role: 'user', content }] })
+      body: JSON.stringify({
+        model: 'claude-opus-4-5',
+        max_tokens: 3000,
+        messages: [{ role: 'user', content }]
+      })
     })
 
     if (!response.ok) {
       const errText = await response.text()
-      return { statusCode: 500, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'Anthropic API error: ' + errText, steps: [], connections: [] }) }
+      return {
+        statusCode: 500,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ error: 'Anthropic API error: ' + errText, steps: [], connections: [] })
+      }
     }
 
     const data = await response.json()
     const rawText = data.content?.[0]?.text || ''
     const cleaned = rawText.trim().replace(/^```json?\s*/i, '').replace(/\s*```$/i, '').trim()
 
-    let parsed
-    try { parsed = JSON.parse(cleaned) }
-    catch (e) { return { statusCode: 500, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'Failed to parse AI response: ' + e.message, raw: rawText, steps: [], connections: [] }) } }
+    let result
+    try {
+      result = JSON.parse(cleaned)
+    } catch (e) {
+      return {
+        statusCode: 500,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          error: 'Could not parse AI response: ' + e.message,
+          raw: rawText.slice(0, 500),
+          steps: [],
+          connections: []
+        })
+      }
+    }
 
-    return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(parsed) }
+    return {
+      statusCode: 200,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(result)
+    }
+
   } catch (err) {
-    return { statusCode: 500, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ error: err.message, steps: [], connections: [] }) }
+    return {
+      statusCode: 500,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ error: err.message, steps: [], connections: [] })
+    }
   }
 }
