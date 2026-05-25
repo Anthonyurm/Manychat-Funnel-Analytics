@@ -197,10 +197,10 @@ export async function saveScreenshotSteps(funnelId, parsedSteps) {
   }
 }
 
-// ── EFFECTIVE SENT CALCULATION ────────────────────────────────────────────────
+// ── EFFECTIVE SENT ────────────────────────────────────────────────────────────
 // If M2 sent < 70% of expected (M1 sent × M1 CTR), the funnel was updated
 // mid-run. Reverse-engineer the true cohort: effectiveSent = M2 sent / M1 CTR
-// This applies to any consecutive step pair, not just M1→M2.
+// Applied to ALL import types: CSV, manual, and screenshot.
 export function computeEffectiveSent(msgSteps) {
   if (!msgSteps.length) return null
   const m1m = msgSteps[0]?.step_metrics?.[0]
@@ -212,7 +212,6 @@ export function computeEffectiveSent(msgSteps) {
       const expectedM2 = m1m.sent * m1m.ctr
       const ratio = m2m.sent / expectedM2
       if (ratio < 0.7) {
-        // Funnel updated mid-run — reverse-engineer true cohort
         return Math.round(m2m.sent / m1m.ctr)
       }
     }
@@ -233,28 +232,33 @@ export function computeOverview(funnels) {
     const effectiveSent = computeEffectiveSent(msgSteps)
 
     // Per-step metrics
+    // CTR on each column = that step's clicked / effectiveSent (cumulative, not per-step)
+    // Open rate stays per-step (opened / that step's sent)
     const stepMetrics = {}
     msgSteps.forEach((s, i) => {
       const sm = s.step_metrics?.[0]
       const key = `m${i + 1}`
-      stepMetrics[`${key}_open_rate_pct`] = sm?.open_rate != null ? +(sm.open_rate * 100).toFixed(1) : null
-      stepMetrics[`${key}_ctr_pct`] = sm?.ctr != null ? +(sm.ctr * 100).toFixed(1) : null
+
+      // Open rate: opened / this step's sent (per-step rate)
+      stepMetrics[`${key}_open_rate_pct`] = sm?.open_rate != null
+        ? +(sm.open_rate * 100).toFixed(1) : null
+
+      // CTR: clicked / effectiveSent (cumulative — what % of original cohort clicked this step)
+      stepMetrics[`${key}_ctr_pct`] = sm?.clicked != null && effectiveSent
+        ? +(sm.clicked / effectiveSent * 100).toFixed(1) : null
+
       stepMetrics[`${key}_sent`] = sm?.sent || null
       stepMetrics[`${key}_message`] = s.message_text || null
       stepMetrics[`${key}_cta`] = s.cta_text || null
-      // Reach rate: % of true cohort who made it to this step
-      stepMetrics[`${key}_reach_pct`] = sm?.sent && effectiveSent
-        ? +(sm.sent / effectiveSent * 100).toFixed(1) : null
     })
 
-    // Funnel CR uses effective sent as denominator
+    // Funnel CR = last message step clicked / effectiveSent
+    // (or goal step clicked / effectiveSent if goal exists)
     let funnelCr = null
-    const goalClicks = gm?.clicked
-    if (goalClicks && effectiveSent) {
-      funnelCr = goalClicks / effectiveSent
-    } else if (gm?.ctr) {
-      funnelCr = gm.ctr
+    if (gm?.clicked && effectiveSent) {
+      funnelCr = gm.clicked / effectiveSent
     } else {
+      // No goal step — use last message step's clicked
       const lastMsg = [...msgSteps].reverse().find(s => s.step_metrics?.[0]?.clicked)
       const lastClicks = lastMsg?.step_metrics?.[0]?.clicked
       if (lastClicks && effectiveSent) funnelCr = lastClicks / effectiveSent
@@ -287,7 +291,6 @@ export function computeOverview(funnels) {
     for (let i = 1; i <= maxSteps; i++) {
       avgs[`m${i}_open_rate_pct`] = avg(`m${i}_open_rate_pct`, versionFilter)
       avgs[`m${i}_ctr_pct`] = avg(`m${i}_ctr_pct`, versionFilter)
-      avgs[`m${i}_reach_pct`] = avg(`m${i}_reach_pct`, versionFilter)
     }
     avgs.funnel_cr_pct = avg('funnel_cr_pct', versionFilter)
     avgs.total_sent = avg('total_sent', versionFilter)

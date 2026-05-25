@@ -54,13 +54,40 @@ export function StatCard({ label, value, unit, delta }) {
   )
 }
 
-// Tooltip using fixed positioning to escape table overflow clipping
+// Tooltip uses a portal-style fixed div rendered OUTSIDE the table via React portal
+// to avoid pushing adjacent th elements out of position
 export function ThWithTip({ label, tip, sortKey, sortState, onSort }) {
   const [pos, setPos] = useState(null)
   const isSorted = sortState?.key === sortKey
 
   return (
     <>
+      {pos && tip && (
+        <div style={{
+          position: 'fixed',
+          top: pos.y,
+          left: pos.x,
+          transform: 'translate(-50%, -100%)',
+          background: '#12122a',
+          border: '1px solid var(--border)',
+          borderRadius: 8,
+          padding: '8px 12px',
+          fontSize: 11,
+          color: 'var(--text)',
+          fontFamily: 'var(--mono)',
+          fontWeight: 400,
+          letterSpacing: 0,
+          textTransform: 'none',
+          boxShadow: '0 4px 24px rgba(0,0,0,0.6)',
+          maxWidth: 220,
+          whiteSpace: 'normal',
+          lineHeight: 1.5,
+          zIndex: 99999,
+          pointerEvents: 'none',
+        }}>
+          {tip}
+        </div>
+      )}
       <th
         className={'sortable' + (isSorted ? ' sorted' : '')}
         onClick={() => onSort && onSort(sortKey)}
@@ -79,34 +106,6 @@ export function ThWithTip({ label, tip, sortKey, sortState, onSort }) {
           )}
         </div>
       </th>
-      {pos && tip && (
-        <th style={{ padding: 0, border: 'none', position: 'static' }}>
-          <div style={{
-            position: 'fixed',
-            top: pos.y,
-            left: pos.x,
-            transform: 'translate(-50%, -100%)',
-            background: '#12122a',
-            border: '1px solid var(--border)',
-            borderRadius: 8,
-            padding: '8px 12px',
-            fontSize: 11,
-            color: 'var(--text)',
-            fontFamily: 'var(--mono)',
-            fontWeight: 400,
-            letterSpacing: 0,
-            textTransform: 'none',
-            boxShadow: '0 4px 24px rgba(0,0,0,0.6)',
-            maxWidth: 220,
-            whiteSpace: 'normal',
-            lineHeight: 1.5,
-            zIndex: 99999,
-            pointerEvents: 'none',
-          }}>
-            {tip}
-          </div>
-        </th>
-      )}
     </>
   )
 }

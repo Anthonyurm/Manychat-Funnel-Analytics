@@ -16,7 +16,7 @@ export default function Layout({ session }) {
     <div className="shell">
       <nav className="sidebar">
         <div className="logo">
-          <div className="logo-mark">Funnel Analytics</div>
+          <div className="logo-mark">FUNNEL IQ</div>
           <div className="logo-sub">Elite Artist Society</div>
         </div>
 

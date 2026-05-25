@@ -30,7 +30,7 @@ export default function Login() {
       <div style={{ width: '100%', maxWidth: 420 }}>
         <div style={{ textAlign: 'center', marginBottom: 40 }}>
           <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--text)', letterSpacing: '-0.5px' }}>
-            Funnel Analytics
+            FUNNEL IQ
           </div>
           <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', marginTop: 6, letterSpacing: 1.5, textTransform: 'uppercase' }}>
             Powered by The Elite Artist Society
