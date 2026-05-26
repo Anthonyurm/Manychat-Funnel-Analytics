@@ -5,16 +5,23 @@ import { VERSIONS } from '../components/UI'
 
 const VISION_PROMPT = `You are analyzing ManyChat flow builder screenshots for a music artist's Instagram DM automation. Treat all images as one continuous flow reading left to right.
 
-EXTRACTION RULES:
-1. ONLY extract Instagram Send Message nodes. SKIP everything else: Condition, Action, Smart Delay, When/trigger, External Request, Waiting nodes.
-2. A single Send Message node can contain multiple message bubbles stacked vertically. Do NOT split these into separate steps. One node header ("Instagram / Send Message #X") = one step. Combine all message text from the same node into one message_text field separated by a line break.
-3. SKIP any message node where Clicked is 0 and there is no actionable CTA button — these are automated delivery nodes (e.g. "here's your link", "song unlocked"). The next message after it becomes the next step.
-4. SKIP any message where Sent is less than 20% of the previous message Sent count — these are minority path branches.
-5. At every split point where a message has multiple CTA buttons, follow the path triggered by the button with the HIGHEST CTR percentage. Record ALL button labels and their CTR percentages in branch_metadata for weighted CR calculation.
-6. Label messages M1, M2, M3 etc in order following the majority path left to right and top to bottom.
-7. Compute ctr_raw = Clicked / Sent. Compute open_rate_raw = Opened / Sent. Convert percentages to decimals (56.7% becomes 0.567).
+EXTRACTION RULES — follow every rule exactly:
 
-Return ONLY this exact JSON, no markdown, no explanation:
+1. ONLY extract Instagram Send Message nodes. SKIP everything else without exception: Condition nodes, Action nodes, Smart Delay nodes, When/trigger nodes, External Request nodes, Waiting nodes.
+
+2. A single Send Message node can contain multiple message bubbles stacked vertically. Do NOT split these into separate steps. One node header ("Instagram / Send Message #X") = one step. Combine all message text from the same node into one message_text field.
+
+3. SKIP any Send Message node where Clicked is 0% and there is no actionable CTA button — these are automated delivery nodes (e.g. "song unlocked", "here's your link"). The next Send Message node after it becomes the next numbered step.
+
+4. SKIP any Send Message node where Sent is less than 20% of the previous included Send Message node's Sent count. These are minority path branches.
+
+5. At every split point where a message has multiple CTA buttons, you MUST compare the actual CTR percentage numbers shown next to each button. Follow ONLY the path triggered by the button with the NUMERICALLY HIGHEST CTR percentage. This is critical — do not guess based on button label or position. Read the actual number shown (e.g. "CTR 54%" beats "CTR 18%"). Record ALL button labels and their exact CTR percentages in branch_metadata.
+
+6. Label messages M1, M2, M3 etc in order following the majority path only, left to right and top to bottom across all images.
+
+7. Compute ctr_raw = Clicked / Sent using the raw counts shown. Compute open_rate_raw = Opened / Sent. Convert any percentage shown (e.g. 56.7%) to a decimal (0.567).
+
+Return ONLY this exact JSON with no markdown and no explanation text:
 {
   "steps": [
     {
@@ -22,12 +29,12 @@ Return ONLY this exact JSON, no markdown, no explanation:
       "label": "M1",
       "type": "message",
       "message_text": "exact message copy from node",
-      "cta_text": "majority path button label or null",
-      "sent": 637,
-      "opened": 431,
-      "clicked": 361,
-      "ctr_raw": 0.567,
-      "open_rate_raw": 0.678,
+      "cta_text": "label of the highest-CTR button or null if no buttons",
+      "sent": 3391,
+      "opened": 2427,
+      "clicked": 1913,
+      "ctr_raw": 0.564,
+      "open_rate_raw": 0.716,
       "notes": ""
     }
   ],
@@ -35,17 +42,17 @@ Return ONLY this exact JSON, no markdown, no explanation:
     {
       "from_order": 1,
       "to_order": 2,
-      "label": "majority button label",
+      "label": "label of highest-CTR button",
       "branch_metadata": {
-        "total_sent_at_split": 943,
+        "total_sent_at_split": 147,
         "branches": [
-          { "label": "Yes i have!", "ctr": 0.31, "sent": 292 },
-          { "label": "Not yet", "ctr": 0.20, "sent": 189 }
+          { "label": "no but tell me more", "ctr": 0.54, "sent": 79 },
+          { "label": "yes i joined!", "ctr": 0.18, "sent": 26 }
         ]
       }
     }
   ],
-  "funnel_notes": "summary of flow and which branches were followed"
+  "funnel_notes": "summary of which branches were followed and why"
 }`
 
 export default function NewFunnel() {
@@ -187,9 +194,7 @@ export default function NewFunnel() {
                   e.currentTarget.classList.remove('over')
                   setFiles(Array.from(e.dataTransfer.files))
                 }}>
-                <div style={{ fontSize: 36, marginBottom: 10 }}>
-                  {files.length > 0 ? '✓' : '🖼️'}
-                </div>
+                <div style={{ fontSize: 36, marginBottom: 10 }}>{files.length > 0 ? '✓' : '🖼️'}</div>
                 <div className="upload-title">
                   {files.length > 0
                     ? `${files.length} image${files.length > 1 ? 's' : ''} selected`

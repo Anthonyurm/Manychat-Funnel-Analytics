@@ -85,7 +85,6 @@ export async function upsertMetric({ step_id, sent, opened, clicked, source = 'm
 export async function saveScreenshotSteps(funnelId, parsedSteps, parsedConnections) {
   const { data: { user } } = await supabase.auth.getUser()
 
-  // Clear existing
   const { data: existingSteps } = await supabase.from('steps').select('id').eq('funnel_id', funnelId)
   if (existingSteps?.length) {
     for (const s of existingSteps) {
@@ -95,7 +94,6 @@ export async function saveScreenshotSteps(funnelId, parsedSteps, parsedConnectio
   }
   await supabase.from('connections').delete().eq('funnel_id', funnelId)
 
-  // Insert steps and collect id map
   const stepIdMap = {}
   for (const stepData of parsedSteps) {
     const { data: step } = await supabase.from('steps')
@@ -113,20 +111,20 @@ export async function saveScreenshotSteps(funnelId, parsedSteps, parsedConnectio
     if (step) {
       stepIdMap[stepData.order] = step.id
       if (stepData.sent || stepData.clicked) {
+        const sent = stepData.sent || null
+        const opened = stepData.opened || null
+        const clicked = stepData.clicked || null
         await supabase.from('step_metrics').insert({
           step_id: step.id, user_id: user.id,
-          sent: stepData.sent || null,
-          opened: stepData.opened || null,
-          clicked: stepData.clicked || null,
-          ctr: stepData.sent && stepData.clicked ? stepData.clicked / stepData.sent : null,
-          open_rate: stepData.sent && stepData.opened ? stepData.opened / stepData.sent : null,
+          sent, opened, clicked,
+          ctr: sent && clicked ? clicked / sent : null,
+          open_rate: sent && opened ? opened / sent : null,
           source: 'screenshot',
         })
       }
     }
   }
 
-  // Insert connections with branch metadata
   if (parsedConnections?.length) {
     for (const conn of parsedConnections) {
       const fromId = stepIdMap[conn.from_order]
@@ -138,8 +136,7 @@ export async function saveScreenshotSteps(funnelId, parsedSteps, parsedConnectio
           to_step_id: toId,
           label: conn.label || null,
           user_id: user.id,
-          // Store all branch CTRs as metadata for weighted CR calculation
-          ...(conn.branch_metadata ? { branch_metadata: JSON.stringify(conn.branch_metadata) } : {})
+          ...(conn.branch_metadata ? { branch_metadata: conn.branch_metadata } : {})
         })
       }
     }
@@ -147,60 +144,81 @@ export async function saveScreenshotSteps(funnelId, parsedSteps, parsedConnectio
 }
 
 // ── NORMALISE STEPS ───────────────────────────────────────────────────────────
-// Checks every consecutive step pair. If step[i+1].sent < 70% of
-// step[i].clicked, the funnel was updated between those steps.
-// Recalculates effective sent/opened/clicked for the affected step.
+// For each consecutive step pair, check if the funnel was updated mid-run.
+// Condition: next.sent < 70% of (curr.sent × curr_ctr_rate)
+// where curr_ctr_rate is recalculated fresh from raw sent/clicked — NOT from
+// the stored ctr field, which may differ due to rounding at parse time.
+//
+// If triggered: effectiveSent = next.sent / curr_ctr_rate (precise division)
+// This matches: effectiveSent × curr_ctr_rate = next.sent exactly.
 export function normaliseSteps(msgSteps) {
   if (!msgSteps.length) return []
 
   const raw = msgSteps.map(s => {
     const m = s.step_metrics?.[0]
+    const sent = m?.sent || null
+    const opened = m?.opened || null
+    const clicked = m?.clicked || null
+    // Recalculate CTR from raw counts for precision — do not use stored ctr field
+    const ctrRate = sent && clicked ? clicked / sent : (m?.ctr || null)
+    const openRate = sent && opened ? opened / sent : (m?.open_rate || null)
+
     return {
       step: s,
-      sent: m?.sent || null,
-      opened: m?.opened || null,
-      clicked: m?.clicked || null,
-      ctr: m?.ctr || null,
-      open_rate: m?.open_rate || null,
+      sent,
+      opened,
+      clicked,
+      ctrRate,   // precise rate from raw counts
+      openRate,
       wasAdjusted: false,
-      effectiveSent: m?.sent || null,
-      effectiveOpened: m?.opened || null,
-      effectiveClicked: m?.clicked || null,
+      effectiveSent: sent,
+      effectiveOpened: opened,
+      effectiveClicked: clicked,
     }
   })
 
   for (let i = 0; i < raw.length - 1; i++) {
     const curr = raw[i]
     const next = raw[i + 1]
-    if (!curr.effectiveClicked || !next.sent || !curr.ctr) continue
-    const ratio = next.sent / curr.effectiveClicked
+
+    // Need both curr's effective clicked and next's raw sent to compare
+    if (!curr.effectiveClicked || !next.sent || !curr.ctrRate) continue
+
+    // Expected next sent = curr effective clicked (people who clicked curr get next)
+    const expectedNextSent = curr.effectiveClicked
+    const ratio = next.sent / expectedNextSent
+
+    // Only adjust if next.sent is significantly less than expected (< 70%)
+    // This means the funnel was updated between these two steps
     if (ratio < 0.7) {
-      const newEffectiveSent = Math.round(next.sent / curr.ctr)
+      // Precise calculation: effectiveSent = next.sent / ctrRate
+      // This ensures: effectiveSent × ctrRate = next.sent exactly
+      const newEffectiveSent = Math.round(next.sent / curr.ctrRate)
+      const newEffectiveClicked = next.sent
+      const newEffectiveOpened = curr.openRate
+        ? Math.round(newEffectiveSent * curr.openRate)
+        : null
+
       raw[i] = {
         ...curr,
         effectiveSent: newEffectiveSent,
-        effectiveOpened: curr.open_rate ? Math.round(newEffectiveSent * curr.open_rate) : null,
-        effectiveClicked: next.sent,
+        effectiveOpened: newEffectiveOpened,
+        effectiveClicked: newEffectiveClicked,
         wasAdjusted: true,
       }
     }
+    // If ratio >= 0.7, no adjustment — next.sent is within expected range
   }
 
   return raw
 }
 
-// ── WEIGHTED BRANCH CR ────────────────────────────────────────────────────────
-// Uses branch_metadata stored on connections to calculate true end-to-end CR
-// accounting for all branches, not just the majority path.
-// Falls back to majority-only CR if no branch metadata exists.
 function computeWeightedCr(msgSteps, goalStep, connections, effectiveSent) {
   if (!effectiveSent) return null
 
-  // Check if any connections have branch metadata
   const hasBranchData = connections?.some(c => c.branch_metadata)
 
   if (!hasBranchData) {
-    // Fall back to majority model
     const gm = goalStep?.step_metrics?.[0]
     if (gm?.clicked) return gm.clicked / effectiveSent
     const lastMsg = [...msgSteps].reverse().find(s => s.step_metrics?.[0]?.clicked)
@@ -208,33 +226,25 @@ function computeWeightedCr(msgSteps, goalStep, connections, effectiveSent) {
     return lastClicks ? lastClicks / effectiveSent : null
   }
 
-  // Find all branch points and sum weighted contributions
   let totalWeightedClicks = 0
-  let totalBranchSent = 0
-
   connections.forEach(conn => {
     if (!conn.branch_metadata) return
     try {
       const meta = typeof conn.branch_metadata === 'string'
         ? JSON.parse(conn.branch_metadata)
         : conn.branch_metadata
-
       if (meta.branches) {
         meta.branches.forEach(branch => {
           if (branch.sent && branch.end_clicks) {
             totalWeightedClicks += branch.end_clicks
-            totalBranchSent += branch.sent
           }
         })
       }
     } catch {}
   })
 
-  if (totalBranchSent > 0 && totalWeightedClicks > 0) {
-    return totalWeightedClicks / effectiveSent
-  }
+  if (totalWeightedClicks > 0) return totalWeightedClicks / effectiveSent
 
-  // Fall back to majority
   const lastMsg = [...msgSteps].reverse().find(s => s.step_metrics?.[0]?.clicked)
   const lastClicks = lastMsg?.step_metrics?.[0]?.clicked
   return lastClicks ? lastClicks / effectiveSent : null
@@ -253,21 +263,20 @@ export function computeOverview(funnels) {
     const normalised = normaliseSteps(msgSteps)
     const effectiveSent = normalised[0]?.effectiveSent || null
     const wasUpdated = normalised.some(n => n.wasAdjusted)
-
-    // Count branch points (steps where multiple CTAs lead different directions)
     const branchCount = connections.filter(c => c.branch_metadata).length
 
-    // Per-step metrics using majority model + effective sent
     const stepMetrics = {}
     normalised.forEach((n, i) => {
       const key = `m${i + 1}`
+
       stepMetrics[`${key}_open_rate_pct`] = n.effectiveOpened != null && n.effectiveSent
         ? +(n.effectiveOpened / n.effectiveSent * 100).toFixed(1)
-        : (n.open_rate != null ? +(n.open_rate * 100).toFixed(1) : null)
+        : (n.openRate != null ? +(n.openRate * 100).toFixed(1) : null)
 
-      // Cumulative CTR = this step's effective clicked / first step's effective sent
-      if (i === 0 && n.wasAdjusted && n.ctr != null) {
-        stepMetrics[`${key}_ctr_pct`] = +(n.ctr * 100).toFixed(1)
+      // Cumulative CTR: for adjusted M1, use ctrRate directly (it's precise)
+      // For all others, use effectiveClicked / effectiveSent
+      if (i === 0 && n.wasAdjusted && n.ctrRate != null) {
+        stepMetrics[`${key}_ctr_pct`] = +(n.ctrRate * 100).toFixed(1)
       } else if (n.effectiveClicked != null && effectiveSent) {
         stepMetrics[`${key}_ctr_pct`] = +(n.effectiveClicked / effectiveSent * 100).toFixed(1)
       } else {
@@ -280,7 +289,6 @@ export function computeOverview(funnels) {
       stepMetrics[`${key}_was_adjusted`] = n.wasAdjusted
     })
 
-    // Weighted end-to-end CR (uses branch data if available, else majority)
     const weightedCr = computeWeightedCr(msgSteps, goalStep, connections, effectiveSent)
 
     return {
