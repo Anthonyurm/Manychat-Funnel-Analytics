@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { getFunnel, deleteFunnel, upsertMetric, computeOverview, getFunnels, computeEffectiveSent } from '../lib/db'
+import { getFunnel, deleteFunnel, upsertMetric, computeOverview, getFunnels, normaliseSteps } from '../lib/db'
 import { Bar, Badge, Spinner, pct, num, colorFor } from '../components/UI'
 
 export default function FunnelDetail() {
@@ -44,21 +44,33 @@ export default function FunnelDetail() {
   const steps = funnel.steps || []
   const keywords = funnel.keywords?.map(k => k.keyword) || []
 
-  // Compute effective sent for this funnel using same logic as overview
   const msgSteps = steps.filter(s => s.step_type !== 'goal').sort((a, b) => a.step_order - b.step_order)
   const goalStep = steps.find(s => s.step_type === 'goal')
-  const effectiveSent = computeEffectiveSent(msgSteps)
 
-  // Funnel CR for this specific funnel: last step clicks / effectiveSent
-  const lastClickedStep = goalStep || [...msgSteps].reverse().find(s => s.step_metrics?.[0]?.clicked)
-  const lastClicks = lastClickedStep?.step_metrics?.[0]?.clicked
+  // Normalise: get effective sent/opened/clicked for every step
+  const normalised = normaliseSteps(msgSteps)
+  const effectiveSent = normalised[0]?.effectiveSent || null
+  const wasUpdated = normalised.some(n => n.wasAdjusted)
+
+  // Funnel CR for this funnel
+  const lastN = [...normalised].reverse().find(n => n.effectiveClicked)
+  const lastClicks = goalStep?.step_metrics?.[0]?.clicked || lastN?.effectiveClicked
   const thisFunnelCr = lastClicks && effectiveSent ? (lastClicks / effectiveSent * 100) : null
 
-  // M1 stats for this funnel
-  const m1Step = msgSteps[0]
-  const m1m = m1Step?.step_metrics?.[0]
-  const thisM1OpenRate = m1m?.open_rate != null ? m1m.open_rate * 100 : null
-  const thisM1Ctr = m1m?.clicked != null && effectiveSent ? (m1m.clicked / effectiveSent * 100) : null
+  // M1 stats for vs average
+  const n0 = normalised[0]
+  const thisM1OpenRate = n0?.effectiveOpened != null && n0?.effectiveSent
+    ? (n0.effectiveOpened / n0.effectiveSent * 100)
+    : null
+  const thisM1Ctr = n0?.effectiveClicked != null && effectiveSent
+    ? (n0.effectiveClicked / effectiveSent * 100)
+    : null
+
+  // Build a merged list: normalised message steps + goal at end
+  const allDisplaySteps = [
+    ...msgSteps.map((step, i) => ({ step, norm: normalised[i], isGoal: false })),
+    ...(goalStep ? [{ step: goalStep, norm: null, isGoal: true }] : [])
+  ]
 
   return (
     <div>
@@ -67,32 +79,51 @@ export default function FunnelDetail() {
           <button className="btn btn-ghost btn-sm" style={{ marginBottom: 12 }} onClick={() => navigate('/')}>← Overview</button>
           <div className="page-title">{funnel.name} <Badge version={funnel.version} /></div>
           <div className="page-subtitle">
-            {keywords.length ? `Keywords: ${keywords.join(', ')} · ` : ''}
+            {keywords.length ? `Trigger words: ${keywords.join(', ')} · ` : ''}
             {msgSteps.length} steps
-            {effectiveSent && m1m?.sent && effectiveSent !== m1m.sent
-              ? ` · Effective cohort: ${effectiveSent.toLocaleString()} (raw: ${m1m.sent.toLocaleString()})`
+            {wasUpdated && effectiveSent
+              ? ` · Effective cohort: ${effectiveSent.toLocaleString()}`
               : ''}
           </div>
         </div>
         <button className="btn btn-danger btn-sm" onClick={handleDelete}>Delete Funnel</button>
       </div>
 
+      {wasUpdated && (
+        <div style={{ background: 'rgba(255,209,102,0.07)', border: '1px solid rgba(255,209,102,0.25)', borderRadius: 10, padding: '12px 18px', marginBottom: 20, fontSize: 13, color: 'var(--text)' }}>
+          <strong style={{ color: 'var(--gold)' }}>Funnel updated mid-run</strong> — one or more steps show fewer entries than expected from the previous step. Numbers marked with <strong style={{ color: 'var(--gold)' }}>~</strong> have been recalculated to reflect the actual current cohort. Raw original numbers are shown in parentheses where they differ.
+        </div>
+      )}
+
       {/* Flow diagram */}
       <div className="card">
         <div className="card-title">Flow</div>
         <div className="funnel-flow">
-          {steps.map((step, i) => {
+          {allDisplaySteps.map(({ step, norm, isGoal }, i) => {
             const m = step.step_metrics?.[0]
-            const prev = i > 0 ? steps[i - 1] : null
-            const prevM = prev?.step_metrics?.[0]
-            const dropPct = prev && m?.sent && prevM?.sent
-              ? Math.round((1 - m.sent / prevM.sent) * 100) : null
-            const isGoal = step.step_type === 'goal'
             const isEditing = editing === step.id
 
-            // Cumulative CR for this step = this step's clicked / effectiveSent
-            const cumulativeCtr = m?.clicked && effectiveSent
-              ? (m.clicked / effectiveSent * 100).toFixed(1) : null
+            // For display: use effective values where available, else raw
+            const displaySent = norm?.effectiveSent ?? m?.sent
+            const displayOpened = norm?.effectiveOpened ?? m?.opened
+            const displayClicked = norm?.effectiveClicked ?? m?.clicked
+            const wasAdjusted = norm?.wasAdjusted || false
+
+            // Drop-off between this step and previous
+            const prevNorm = i > 0 && !isGoal ? normalised[i - 1] : null
+            const prevEffectiveSent = prevNorm?.effectiveSent
+            const dropPct = prevEffectiveSent && displaySent && !isGoal
+              ? Math.round((1 - displaySent / prevEffectiveSent) * 100) : null
+
+            // Cumulative CR for this step
+            const cumulativeCtr = displayClicked && effectiveSent && !isGoal
+              ? (displayClicked / effectiveSent * 100).toFixed(1) : null
+
+            // Per-step open rate using effective numbers
+            const perStepOpenRate = displayOpened && displaySent
+              ? (displayOpened / displaySent * 100).toFixed(1) : null
+            const perStepCtr = displayClicked && displaySent
+              ? (displayClicked / displaySent * 100).toFixed(1) : null
 
             return (
               <div key={step.id} className="step-block">
@@ -111,7 +142,12 @@ export default function FunnelDetail() {
                   <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>
                     {isGoal ? 'Goal' : `Step ${step.step_order}`}
                   </div>
-                  <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 10 }}>{step.label}</div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                    <div style={{ fontWeight: 700, fontSize: 13 }}>{step.label}</div>
+                    {wasAdjusted && (
+                      <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--gold)', letterSpacing: 0.5 }} title="Numbers recalculated — funnel was updated mid-run">ADJUSTED</span>
+                    )}
+                  </div>
 
                   {isEditing ? (
                     <div>
@@ -135,47 +171,61 @@ export default function FunnelDetail() {
                     </div>
                   ) : (
                     <div>
-                      {m ? (
-                        <>
-                          {m.sent != null && (
-                            <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--mono)', fontSize: 11, padding: '3px 0', borderBottom: '1px solid var(--border)' }}>
-                              <span style={{ color: 'var(--muted)' }}>sent</span>
-                              <span>{num(m.sent)}</span>
-                            </div>
-                          )}
-                          {m.opened != null && (
-                            <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--mono)', fontSize: 11, padding: '3px 0', borderBottom: '1px solid var(--border)' }}>
-                              <span style={{ color: 'var(--muted)' }}>opened</span>
-                              <span>{num(m.opened)} <span style={{ color: 'var(--muted)' }}>({pct(m.open_rate * 100)})</span></span>
-                            </div>
-                          )}
-                          {m.clicked != null && (
-                            <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--mono)', fontSize: 11, padding: '3px 0', borderBottom: '1px solid var(--border)' }}>
-                              <span style={{ color: 'var(--muted)' }}>clicked</span>
-                              <span style={{ color: colorFor(m.ctr * 100, 20, 50) }}>
-                                {num(m.clicked)} <span style={{ color: 'var(--muted)', fontSize: 10 }}>(step {pct(m.ctr * 100)})</span>
-                              </span>
-                            </div>
-                          )}
-                          {cumulativeCtr != null && !isGoal && (
-                            <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--mono)', fontSize: 11, padding: '3px 0' }}>
-                              <span style={{ color: 'var(--muted)' }}>cumulative CR</span>
-                              <span style={{ color: colorFor(parseFloat(cumulativeCtr), 15, 40), fontWeight: 700 }}>{cumulativeCtr}%</span>
-                            </div>
-                          )}
-                        </>
-                      ) : <div style={{ color: 'var(--muted)', fontFamily: 'var(--mono)', fontSize: 11 }}>No metrics</div>}
+                      {(displaySent != null || m?.sent != null) && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--mono)', fontSize: 11, padding: '3px 0', borderBottom: '1px solid var(--border)' }}>
+                          <span style={{ color: 'var(--muted)' }}>sent</span>
+                          <span>
+                            {wasAdjusted ? <span style={{ color: 'var(--gold)' }}>~</span> : ''}
+                            {num(displaySent)}
+                            {wasAdjusted && m?.sent && m.sent !== displaySent && (
+                              <span style={{ color: 'var(--muted)', fontSize: 9, marginLeft: 4 }}>({num(m.sent)} raw)</span>
+                            )}
+                          </span>
+                        </div>
+                      )}
+                      {(displayOpened != null) && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--mono)', fontSize: 11, padding: '3px 0', borderBottom: '1px solid var(--border)' }}>
+                          <span style={{ color: 'var(--muted)' }}>opened</span>
+                          <span>
+                            {wasAdjusted ? <span style={{ color: 'var(--gold)' }}>~</span> : ''}
+                            {num(displayOpened)}
+                            {perStepOpenRate && <span style={{ color: 'var(--muted)', fontSize: 9, marginLeft: 4 }}>({perStepOpenRate}%)</span>}
+                          </span>
+                        </div>
+                      )}
+                      {(displayClicked != null) && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--mono)', fontSize: 11, padding: '3px 0', borderBottom: '1px solid var(--border)' }}>
+                          <span style={{ color: 'var(--muted)' }}>clicked</span>
+                          <span style={{ color: colorFor(parseFloat(perStepCtr), 20, 50) }}>
+                            {wasAdjusted ? <span style={{ color: 'var(--gold)' }}>~</span> : ''}
+                            {num(displayClicked)}
+                            {perStepCtr && <span style={{ fontSize: 9, marginLeft: 4 }}>({perStepCtr}%)</span>}
+                          </span>
+                        </div>
+                      )}
+                      {cumulativeCtr != null && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--mono)', fontSize: 11, padding: '3px 0' }}>
+                          <span style={{ color: 'var(--muted)' }}>cumulative CR</span>
+                          <span style={{ color: colorFor(parseFloat(cumulativeCtr), 15, 40), fontWeight: 700 }}>{cumulativeCtr}%</span>
+                        </div>
+                      )}
+                      {!m && <div style={{ color: 'var(--muted)', fontFamily: 'var(--mono)', fontSize: 11 }}>No metrics</div>}
 
                       {step.message_text && (
                         <div className="msg-bubble" style={{ fontSize: 11 }}>{step.message_text}</div>
                       )}
 
-                      <button
-                        className="btn btn-ghost btn-sm"
-                        style={{ marginTop: 10, width: '100%' }}
-                        onClick={() => { setEditing(step.id); setEditVals({ sent: m?.sent, opened: m?.opened, clicked: m?.clicked }) }}>
-                        Edit metrics
-                      </button>
+                      {!isGoal && (
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          style={{ marginTop: 10, width: '100%' }}
+                          onClick={() => {
+                            setEditing(step.id)
+                            setEditVals({ sent: m?.sent, opened: m?.opened, clicked: m?.clicked })
+                          }}>
+                          Edit raw metrics
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -185,8 +235,8 @@ export default function FunnelDetail() {
         </div>
       </div>
 
-      {/* vs average — uses computed funnel CR not raw goal step ctr */}
-      {averages && m1m && (
+      {/* vs average */}
+      {averages && n0 && (
         <div className="table-wrap">
           <div className="table-header"><div className="table-title">vs. Your Average</div></div>
           <table>

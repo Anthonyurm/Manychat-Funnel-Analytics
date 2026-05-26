@@ -3,7 +3,7 @@ import { supabase } from './supabase'
 export async function getFunnels() {
   const { data, error } = await supabase
     .from('funnels')
-    .select(`*, keywords(*), steps(*, step_metrics(*))`)
+    .select(`*, keywords(*), steps(*, step_metrics(*)), connections(*)`)
     .order('created_at', { ascending: false })
   if (error) throw error
   return data.map(enrichFunnel)
@@ -82,86 +82,10 @@ export async function upsertMetric({ step_id, sent, opened, clicked, source = 'm
   return data
 }
 
-export async function importCSVRows(rows) {
+export async function saveScreenshotSteps(funnelId, parsedSteps, parsedConnections) {
   const { data: { user } } = await supabase.auth.getUser()
-  const results = []
-  for (const row of rows) {
-    try {
-      const { data: funnel, error: fErr } = await supabase
-        .from('funnels')
-        .insert({ name: row.name, version: row.version, user_id: user.id })
-        .select().single()
-      if (fErr) throw fErr
 
-      if (row.keywords?.length) {
-        await supabase.from('keywords').insert(
-          row.keywords.map(k => ({ funnel_id: funnel.id, keyword: k, user_id: user.id }))
-        )
-      }
-
-      const { data: step1 } = await supabase.from('steps')
-        .insert({ funnel_id: funnel.id, step_order: 1, label: 'M1', step_type: 'message', message_text: row.m1_message, user_id: user.id })
-        .select().single()
-
-      if (step1 && (row.m1_sent || row.m1_clicked)) {
-        const m1Sent = row.m1_sent || null
-        await supabase.from('step_metrics').insert({
-          step_id: step1.id, user_id: user.id,
-          sent: m1Sent, opened: row.m1_opened || null, clicked: row.m1_clicked || null,
-          ctr: m1Sent && row.m1_clicked ? row.m1_clicked / m1Sent : null,
-          open_rate: m1Sent && row.m1_opened ? row.m1_opened / m1Sent : null,
-          source: 'csv_import'
-        })
-      }
-
-      let step2 = null
-      if (row.m2_sent || row.m2_clicked) {
-        const { data: s2 } = await supabase.from('steps')
-          .insert({ funnel_id: funnel.id, step_order: 2, label: 'M2', step_type: 'message', user_id: user.id })
-          .select().single()
-        step2 = s2
-        if (s2) {
-          await supabase.from('step_metrics').insert({
-            step_id: s2.id, user_id: user.id,
-            sent: row.m2_sent || null, opened: row.m2_opened || null, clicked: row.m2_clicked || null,
-            ctr: row.m2_sent && row.m2_clicked ? row.m2_clicked / row.m2_sent : null,
-            open_rate: row.m2_sent && row.m2_opened ? row.m2_opened / row.m2_sent : null,
-            source: 'csv_import'
-          })
-        }
-      }
-
-      const goalOrder = step2 ? 3 : 2
-      const { data: goalStep } = await supabase.from('steps')
-        .insert({ funnel_id: funnel.id, step_order: goalOrder, label: 'Goal', step_type: 'goal', user_id: user.id })
-        .select().single()
-
-      if (goalStep && row.funnel_cr != null && row.m1_sent) {
-        await supabase.from('step_metrics').insert({
-          step_id: goalStep.id, user_id: user.id,
-          sent: row.m1_sent, clicked: Math.round(row.funnel_cr * row.m1_sent),
-          ctr: row.funnel_cr, source: 'csv_import'
-        })
-      }
-
-      if (step1 && step2) {
-        await supabase.from('connections').insert({ funnel_id: funnel.id, from_step_id: step1.id, to_step_id: step2.id, label: 'clicked', user_id: user.id })
-      }
-      if (goalStep) {
-        const fromStep = step2 || step1
-        if (fromStep) await supabase.from('connections').insert({ funnel_id: funnel.id, from_step_id: fromStep.id, to_step_id: goalStep.id, label: 'clicked', user_id: user.id })
-      }
-
-      results.push({ name: row.name, status: 'ok' })
-    } catch (e) {
-      results.push({ name: row.name, status: 'error', error: e.message })
-    }
-  }
-  return results
-}
-
-export async function saveScreenshotSteps(funnelId, parsedSteps) {
-  const { data: { user } } = await supabase.auth.getUser()
+  // Clear existing
   const { data: existingSteps } = await supabase.from('steps').select('id').eq('funnel_id', funnelId)
   if (existingSteps?.length) {
     for (const s of existingSteps) {
@@ -169,6 +93,10 @@ export async function saveScreenshotSteps(funnelId, parsedSteps) {
     }
     await supabase.from('steps').delete().eq('funnel_id', funnelId)
   }
+  await supabase.from('connections').delete().eq('funnel_id', funnelId)
+
+  // Insert steps and collect id map
+  const stepIdMap = {}
   for (const stepData of parsedSteps) {
     const { data: step } = await supabase.from('steps')
       .insert({
@@ -182,41 +110,134 @@ export async function saveScreenshotSteps(funnelId, parsedSteps) {
       })
       .select().single()
 
-    if (step && (stepData.sent || stepData.clicked)) {
-      const sent = stepData.sent || null
-      const opened = stepData.opened || null
-      const clicked = stepData.clicked || null
-      await supabase.from('step_metrics').insert({
-        step_id: step.id, user_id: user.id,
-        sent, opened, clicked,
-        ctr: sent && clicked ? clicked / sent : null,
-        open_rate: sent && opened ? opened / sent : null,
-        source: 'screenshot',
-      })
+    if (step) {
+      stepIdMap[stepData.order] = step.id
+      if (stepData.sent || stepData.clicked) {
+        await supabase.from('step_metrics').insert({
+          step_id: step.id, user_id: user.id,
+          sent: stepData.sent || null,
+          opened: stepData.opened || null,
+          clicked: stepData.clicked || null,
+          ctr: stepData.sent && stepData.clicked ? stepData.clicked / stepData.sent : null,
+          open_rate: stepData.sent && stepData.opened ? stepData.opened / stepData.sent : null,
+          source: 'screenshot',
+        })
+      }
+    }
+  }
+
+  // Insert connections with branch metadata
+  if (parsedConnections?.length) {
+    for (const conn of parsedConnections) {
+      const fromId = stepIdMap[conn.from_order]
+      const toId = stepIdMap[conn.to_order]
+      if (fromId && toId) {
+        await supabase.from('connections').insert({
+          funnel_id: funnelId,
+          from_step_id: fromId,
+          to_step_id: toId,
+          label: conn.label || null,
+          user_id: user.id,
+          // Store all branch CTRs as metadata for weighted CR calculation
+          ...(conn.branch_metadata ? { branch_metadata: JSON.stringify(conn.branch_metadata) } : {})
+        })
+      }
     }
   }
 }
 
-// ── EFFECTIVE SENT ────────────────────────────────────────────────────────────
-// If M2 sent < 70% of expected (M1 sent × M1 CTR), the funnel was updated
-// mid-run. Reverse-engineer the true cohort: effectiveSent = M2 sent / M1 CTR
-// Applied to ALL import types: CSV, manual, and screenshot.
-export function computeEffectiveSent(msgSteps) {
-  if (!msgSteps.length) return null
-  const m1m = msgSteps[0]?.step_metrics?.[0]
-  if (!m1m?.sent || !m1m?.ctr) return m1m?.sent || null
+// ── NORMALISE STEPS ───────────────────────────────────────────────────────────
+// Checks every consecutive step pair. If step[i+1].sent < 70% of
+// step[i].clicked, the funnel was updated between those steps.
+// Recalculates effective sent/opened/clicked for the affected step.
+export function normaliseSteps(msgSteps) {
+  if (!msgSteps.length) return []
 
-  if (msgSteps.length >= 2) {
-    const m2m = msgSteps[1]?.step_metrics?.[0]
-    if (m2m?.sent) {
-      const expectedM2 = m1m.sent * m1m.ctr
-      const ratio = m2m.sent / expectedM2
-      if (ratio < 0.7) {
-        return Math.round(m2m.sent / m1m.ctr)
+  const raw = msgSteps.map(s => {
+    const m = s.step_metrics?.[0]
+    return {
+      step: s,
+      sent: m?.sent || null,
+      opened: m?.opened || null,
+      clicked: m?.clicked || null,
+      ctr: m?.ctr || null,
+      open_rate: m?.open_rate || null,
+      wasAdjusted: false,
+      effectiveSent: m?.sent || null,
+      effectiveOpened: m?.opened || null,
+      effectiveClicked: m?.clicked || null,
+    }
+  })
+
+  for (let i = 0; i < raw.length - 1; i++) {
+    const curr = raw[i]
+    const next = raw[i + 1]
+    if (!curr.effectiveClicked || !next.sent || !curr.ctr) continue
+    const ratio = next.sent / curr.effectiveClicked
+    if (ratio < 0.7) {
+      const newEffectiveSent = Math.round(next.sent / curr.ctr)
+      raw[i] = {
+        ...curr,
+        effectiveSent: newEffectiveSent,
+        effectiveOpened: curr.open_rate ? Math.round(newEffectiveSent * curr.open_rate) : null,
+        effectiveClicked: next.sent,
+        wasAdjusted: true,
       }
     }
   }
-  return m1m.sent
+
+  return raw
+}
+
+// ── WEIGHTED BRANCH CR ────────────────────────────────────────────────────────
+// Uses branch_metadata stored on connections to calculate true end-to-end CR
+// accounting for all branches, not just the majority path.
+// Falls back to majority-only CR if no branch metadata exists.
+function computeWeightedCr(msgSteps, goalStep, connections, effectiveSent) {
+  if (!effectiveSent) return null
+
+  // Check if any connections have branch metadata
+  const hasBranchData = connections?.some(c => c.branch_metadata)
+
+  if (!hasBranchData) {
+    // Fall back to majority model
+    const gm = goalStep?.step_metrics?.[0]
+    if (gm?.clicked) return gm.clicked / effectiveSent
+    const lastMsg = [...msgSteps].reverse().find(s => s.step_metrics?.[0]?.clicked)
+    const lastClicks = lastMsg?.step_metrics?.[0]?.clicked
+    return lastClicks ? lastClicks / effectiveSent : null
+  }
+
+  // Find all branch points and sum weighted contributions
+  let totalWeightedClicks = 0
+  let totalBranchSent = 0
+
+  connections.forEach(conn => {
+    if (!conn.branch_metadata) return
+    try {
+      const meta = typeof conn.branch_metadata === 'string'
+        ? JSON.parse(conn.branch_metadata)
+        : conn.branch_metadata
+
+      if (meta.branches) {
+        meta.branches.forEach(branch => {
+          if (branch.sent && branch.end_clicks) {
+            totalWeightedClicks += branch.end_clicks
+            totalBranchSent += branch.sent
+          }
+        })
+      }
+    } catch {}
+  })
+
+  if (totalBranchSent > 0 && totalWeightedClicks > 0) {
+    return totalWeightedClicks / effectiveSent
+  }
+
+  // Fall back to majority
+  const lastMsg = [...msgSteps].reverse().find(s => s.step_metrics?.[0]?.clicked)
+  const lastClicks = lastMsg?.step_metrics?.[0]?.clicked
+  return lastClicks ? lastClicks / effectiveSent : null
 }
 
 export function computeOverview(funnels) {
@@ -226,54 +247,54 @@ export function computeOverview(funnels) {
       .filter(s => s.step_type !== 'goal')
       .sort((a, b) => a.step_order - b.step_order)
     const goalStep = steps.find(s => s.step_type === 'goal')
-    const m1m = msgSteps[0]?.step_metrics?.[0]
-    const gm = goalStep?.step_metrics?.[0]
+    const connections = f.connections || []
+    const m1raw = msgSteps[0]?.step_metrics?.[0]
 
-    const effectiveSent = computeEffectiveSent(msgSteps)
+    const normalised = normaliseSteps(msgSteps)
+    const effectiveSent = normalised[0]?.effectiveSent || null
+    const wasUpdated = normalised.some(n => n.wasAdjusted)
 
-    // Per-step metrics
-    // CTR on each column = that step's clicked / effectiveSent (cumulative, not per-step)
-    // Open rate stays per-step (opened / that step's sent)
+    // Count branch points (steps where multiple CTAs lead different directions)
+    const branchCount = connections.filter(c => c.branch_metadata).length
+
+    // Per-step metrics using majority model + effective sent
     const stepMetrics = {}
-    msgSteps.forEach((s, i) => {
-      const sm = s.step_metrics?.[0]
+    normalised.forEach((n, i) => {
       const key = `m${i + 1}`
+      stepMetrics[`${key}_open_rate_pct`] = n.effectiveOpened != null && n.effectiveSent
+        ? +(n.effectiveOpened / n.effectiveSent * 100).toFixed(1)
+        : (n.open_rate != null ? +(n.open_rate * 100).toFixed(1) : null)
 
-      // Open rate: opened / this step's sent (per-step rate)
-      stepMetrics[`${key}_open_rate_pct`] = sm?.open_rate != null
-        ? +(sm.open_rate * 100).toFixed(1) : null
+      // Cumulative CTR = this step's effective clicked / first step's effective sent
+      if (i === 0 && n.wasAdjusted && n.ctr != null) {
+        stepMetrics[`${key}_ctr_pct`] = +(n.ctr * 100).toFixed(1)
+      } else if (n.effectiveClicked != null && effectiveSent) {
+        stepMetrics[`${key}_ctr_pct`] = +(n.effectiveClicked / effectiveSent * 100).toFixed(1)
+      } else {
+        stepMetrics[`${key}_ctr_pct`] = null
+      }
 
-      // CTR: clicked / effectiveSent (cumulative — what % of original cohort clicked this step)
-      stepMetrics[`${key}_ctr_pct`] = sm?.clicked != null && effectiveSent
-        ? +(sm.clicked / effectiveSent * 100).toFixed(1) : null
-
-      stepMetrics[`${key}_sent`] = sm?.sent || null
-      stepMetrics[`${key}_message`] = s.message_text || null
-      stepMetrics[`${key}_cta`] = s.cta_text || null
+      stepMetrics[`${key}_sent`] = n.effectiveSent
+      stepMetrics[`${key}_message`] = n.step.message_text || null
+      stepMetrics[`${key}_cta`] = n.step.cta_text || null
+      stepMetrics[`${key}_was_adjusted`] = n.wasAdjusted
     })
 
-    // Funnel CR = last message step clicked / effectiveSent
-    // (or goal step clicked / effectiveSent if goal exists)
-    let funnelCr = null
-    if (gm?.clicked && effectiveSent) {
-      funnelCr = gm.clicked / effectiveSent
-    } else {
-      // No goal step — use last message step's clicked
-      const lastMsg = [...msgSteps].reverse().find(s => s.step_metrics?.[0]?.clicked)
-      const lastClicks = lastMsg?.step_metrics?.[0]?.clicked
-      if (lastClicks && effectiveSent) funnelCr = lastClicks / effectiveSent
-    }
+    // Weighted end-to-end CR (uses branch data if available, else majority)
+    const weightedCr = computeWeightedCr(msgSteps, goalStep, connections, effectiveSent)
 
     return {
       id: f.id,
       name: f.name,
       version: f.version,
       keywords: f.keywords?.map(k => k.keyword) || [],
-      total_sent: m1m?.sent || null,
+      total_sent: m1raw?.sent || null,
       effective_sent: effectiveSent,
-      funnel_cr_pct: funnelCr != null ? +(funnelCr * 100).toFixed(1) : null,
+      was_updated: wasUpdated,
+      funnel_cr_pct: weightedCr != null ? +(weightedCr * 100).toFixed(1) : null,
       step_count: msgSteps.length,
       max_step: msgSteps.length,
+      branch_count: branchCount,
       ...stepMetrics,
     }
   })

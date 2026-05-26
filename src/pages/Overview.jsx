@@ -1,16 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getFunnels, computeOverview, deleteFunnel, updateFunnel } from '../lib/db'
-import { Bar, Badge, Spinner, StatCard, ThWithTip, pct, num, VERSIONS } from '../components/UI'
-
-const TIPS = {
-  name: 'The name of this funnel or automation',
-  version: 'The type of funnel — Song Out Now, Pre-Release, New Follower Automation, etc.',
-  open: 'Percentage of people who opened this message out of those it was sent to',
-  ctr: 'Click-through rate — percentage who clicked the CTA button in this message',
-  cr: 'End-to-end conversion rate using effective sent (reverse-engineered to account for mid-run funnel updates)',
-  vol: 'Raw number of people sent the first message — may include people from an older version of the funnel',
-}
+import { Bar, Badge, Spinner, StatCard, pct, num, VERSIONS } from '../components/UI'
 
 function PatternSummary({ funnels, versionFilter }) {
   if (funnels.length < 3) return null
@@ -135,10 +126,15 @@ export default function Overview() {
     return sort.dir === 'asc' ? av - bv : bv - av
   })
 
-  const totalVol = filtered.reduce((s, f) => s + (f.total_sent || 0), 0)
+  const totalVol = filtered.reduce((s, f) => s + (f.effective_sent || f.total_sent || 0), 0)
   const best = [...filtered].filter(f => f.funnel_cr_pct != null).sort((a, b) => b.funnel_cr_pct - a.funnel_cr_pct)[0]
   const bestM1 = [...filtered].filter(f => f.m1_ctr_pct).sort((a, b) => b.m1_ctr_pct - a.m1_ctr_pct)[0]
   const sp = { key: sort.key, dir: sort.dir }
+
+  function arrow(key) {
+    if (sort.key !== key) return <span className="sort-arrow">↕</span>
+    return <span className="sort-arrow" style={{ opacity: 1, color: 'var(--accent)' }}>{sort.dir === 'asc' ? '↑' : '↓'}</span>
+  }
 
   const stepCols = []
   for (let i = 1; i <= maxSteps; i++) {
@@ -210,16 +206,16 @@ export default function Overview() {
               {/* Actions — far left */}
               <th style={{ width: 56 }}></th>
               <th style={{ width: 32 }}></th>
-              <ThWithTip label="Funnel" tip={TIPS.name} sortKey="name" sortState={sp} onSort={toggleSort} />
-              <ThWithTip label="Type" tip={TIPS.version} sortKey="version" sortState={sp} onSort={toggleSort} />
+              <th className={'sortable' + (sort.key === 'name' ? ' sorted' : '')} onClick={() => toggleSort('name')}>Funnel {arrow('name')}</th>
+              <th className={'sortable' + (sort.key === 'version' ? ' sorted' : '')} onClick={() => toggleSort('version')}>Type {arrow('version')}</th>
               {stepCols.map(col => (
                 <>
-                  <ThWithTip key={col.openKey} label={`${col.label} Open`} tip={`${col.label} — ${TIPS.open}`} sortKey={col.openKey} sortState={sp} onSort={toggleSort} />
-                  <ThWithTip key={col.ctrKey} label={`${col.label} CTR`} tip={`${col.label} — ${TIPS.ctr}`} sortKey={col.ctrKey} sortState={sp} onSort={toggleSort} />
+                  <th key={col.openKey} className={'sortable' + (sort.key === col.openKey ? ' sorted' : '')} onClick={() => toggleSort(col.openKey)}>${col.label} Open {arrow(col.openKey)}</th>
+                  <th key={col.ctrKey} className={'sortable' + (sort.key === col.ctrKey ? ' sorted' : '')} onClick={() => toggleSort(col.ctrKey)}>${col.label} CTR {arrow(col.ctrKey)}</th>
                 </>
               ))}
-              <ThWithTip label="Funnel CR" tip={TIPS.cr} sortKey="funnel_cr_pct" sortState={sp} onSort={toggleSort} />
-              <ThWithTip label="Volume" tip={TIPS.vol} sortKey="total_sent" sortState={sp} onSort={toggleSort} />
+              <th className={'sortable' + (sort.key === 'funnel_cr_pct' ? ' sorted' : '')} onClick={() => toggleSort('funnel_cr_pct')}>Funnel CR {arrow('funnel_cr_pct')}</th>
+              <th className={'sortable' + (sort.key === 'effective_sent' ? ' sorted' : '')} onClick={() => toggleSort('effective_sent')}>Volume {arrow('effective_sent')}</th>
             </tr>
           </thead>
           <tbody>
@@ -235,7 +231,7 @@ export default function Overview() {
                 </>
               ))}
               <td><Bar val={averages.funnel_cr_pct} low={15} high={40} /></td>
-              <td className="mono-cell">{num(Math.round(averages.total_sent))}</td>
+              <td className="mono-cell">{num(Math.round(averages.effective_sent))}</td>
             </tr>
 
             {sorted.map((f, i) => (
@@ -291,7 +287,12 @@ export default function Overview() {
                 ))}
 
                 <td><Bar val={f.funnel_cr_pct} low={15} high={40} /></td>
-                <td className="mono-cell" style={{ color: 'var(--muted)' }}>{num(f.total_sent)}</td>
+                <td className="mono-cell" style={{ color: 'var(--muted)' }}>
+                  {num(f.effective_sent)}
+                  {f.was_updated && f.effective_sent !== f.total_sent && (
+                    <span title={`Raw: ${num(f.total_sent)} — funnel was updated mid-run, showing effective cohort`} style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--gold)', marginLeft: 4, cursor: 'help' }}>~</span>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
