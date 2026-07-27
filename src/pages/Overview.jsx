@@ -4,7 +4,7 @@ import { getFunnels, computeOverview, deleteFunnel, updateFunnel } from '../lib/
 import { Bar, Badge, Spinner, StatCard, pct, num, VERSIONS } from '../components/UI'
 
 function PatternSummary({ funnels, versionFilter }) {
-  if (funnels.length < 3) return null
+  if (funnels.length < 4) return null
   const withCr = funnels.filter(f => f.funnel_cr_pct != null && f.m1_ctr_pct != null)
   if (withCr.length < 2) return null
 
@@ -42,8 +42,9 @@ function PatternSummary({ funnels, versionFilter }) {
     insights.push(`M1 CTR is similar across top and bottom performers (${m1Gap}pp gap). The drop-off is happening later in the funnel — look at M2 and beyond for the biggest optimization opportunity.`)
   }
 
-  const topWithQuote = topHalf.filter(f => f.m1_message && /[""].+[""]/.test(f.m1_message)).length
-  const botWithQuote = bottomHalf.filter(f => f.m1_message && /[""].+[""]/.test(f.m1_message)).length
+  const QUOTED = /["\u201C\u201D'].+["\u201C\u201D']/
+  const topWithQuote = topHalf.filter(f => f.m1_message && QUOTED.test(f.m1_message)).length
+  const botWithQuote = bottomHalf.filter(f => f.m1_message && QUOTED.test(f.m1_message)).length
   if (topWithQuote / topHalf.length > 0.6 && botWithQuote / bottomHalf.length < 0.4) {
     insights.push(`Most top converters include the song title in quotes in the first message. Most bottom converters do not. Test adding the song name explicitly to your next M1 message.`)
   }
@@ -175,11 +176,11 @@ export default function Overview() {
       </div>
 
       <div className="stat-grid">
-        <StatCard label="Avg M1 Open Rate" value={averages.m1_open_rate_pct ?? '—'} unit="%" delta="opened / sent" />
-        <StatCard label="Avg M1 CTR" value={averages.m1_ctr_pct ?? '—'} unit="%" delta="clicked / sent" />
-        <StatCard label="Avg M2 CTR" value={averages.m2_ctr_pct ?? '—'} unit="%" delta="follow-up step" />
-        <StatCard label="Avg Funnel CR" value={averages.funnel_cr_pct ?? '—'} unit="%" delta="end-to-end" />
-        <StatCard label="Total Volume" value={totalVol.toLocaleString()} unit="" delta="raw entries — may include old cohorts" />
+        <StatCard label="Avg M1 Open Rate" value={averages.m1_open_rate_pct ?? '—'} unit="%" delta="volume weighted" />
+        <StatCard label="Avg M1 CTR" value={averages.m1_ctr_pct ?? '—'} unit="%" delta="volume weighted" />
+        <StatCard label="Avg M2 CTR" value={averages.m2_ctr_pct ?? '—'} unit="%" delta="volume weighted" />
+        <StatCard label="Avg Funnel CR" value={averages.funnel_cr_pct ?? '—'} unit="%" delta="weighted across branches" />
+        <StatCard label="Total Volume" value={totalVol.toLocaleString()} unit="" delta="effective cohort across funnels" />
       </div>
 
       <PatternSummary funnels={filtered} versionFilter={versionFilter} />
@@ -286,7 +287,14 @@ export default function Overview() {
                   </>
                 ))}
 
-                <td><Bar val={f.funnel_cr_pct} low={15} high={40} /></td>
+                <td>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <Bar val={f.funnel_cr_pct} low={15} high={40} />
+                    {f.funnel_cr_pct != null && !f.cr_is_weighted && (
+                      <span title="Majority path only. Re-upload the screenshots to capture every branch." style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--gold)', cursor: 'help' }}>maj</span>
+                    )}
+                  </div>
+                </td>
                 <td className="mono-cell" style={{ color: 'var(--muted)' }}>
                   {num(f.effective_sent)}
                   {f.was_updated && f.effective_sent !== f.total_sent && (

@@ -21,6 +21,8 @@ EXTRACTION RULES — follow every rule exactly:
 
 7. Compute ctr_raw = Clicked / Sent using the raw counts shown. Compute open_rate_raw = Opened / Sent. Convert any percentage shown (e.g. 56.7%) to a decimal (0.567).
 
+8. Separately from the majority path steps, list EVERY terminal endpoint in the whole flow in terminal_outcomes, including endpoints on minority branches you did not number as steps. A terminal endpoint is the last Send Message node on a path that has a clickable CTA. Report its own sent and clicked counts. Do not include a node more than once, and do not include intermediate nodes, otherwise the end to end rate will double count. If the flow is purely linear with no branches, terminal_outcomes contains exactly one entry for the final step.
+
 Return ONLY this exact JSON with no markdown and no explanation text:
 {
   "steps": [
@@ -51,6 +53,10 @@ Return ONLY this exact JSON with no markdown and no explanation text:
         ]
       }
     }
+  ],
+  "terminal_outcomes": [
+    { "label": "join joy club", "path": "no but tell me more", "sent": 79, "clicked": 57 },
+    { "label": "day one thanks", "path": "yes i joined", "sent": 26, "clicked": 8 }
   ],
   "funnel_notes": "summary of which branches were followed and why"
 }`
@@ -141,7 +147,7 @@ export default function NewFunnel() {
 
       setProgress(`Found ${result.steps.length} steps — saving funnel…`)
       const funnel = await createFunnel({ name: funnelName, version: funnelVersion })
-      await saveScreenshotSteps(funnel.id, result.steps, result.connections)
+      await saveScreenshotSteps(funnel.id, result.steps, result.connections, result.terminal_outcomes)
       navigate(`/funnels/${funnel.id}`)
 
     } catch (err) {

@@ -1,8 +1,24 @@
 import { useEffect, useState } from 'react'
-import { getFunnels, computeOverview, normaliseSteps } from '../lib/db'
+import { getFunnels, computeOverview } from '../lib/db'
 import { Spinner, pct, colorFor } from '../components/UI'
 
-// ── PATTERN HELPERS ───────────────────────────────────────────────────────────
+// FIX: minimum sample sizes. Every verdict below is gated so the app cannot
+// confidently report a pattern off one or two matching messages.
+const MIN_PATTERN_MATCHES = 3
+const MIN_CORRELATION_N = 8
+const MIN_BUCKET = 2
+
+// FIX 7: match straight AND curly quotes. The old regex only had curly, so the
+// song title pattern almost never fired.
+const QUOTED = /["“”'].+["“”']/
+
+// FIX 6: signed delta so an improvement never renders as a double negative
+function ppLabel(v) {
+  if (v == null || Number.isNaN(v)) return '—'
+  const r = Number(v).toFixed(1)
+  return (Number(v) > 0 ? '+' : '') + r + 'pp'
+}
+
 function neutralCheck(withMessages, patterns) {
   const sorted = [...withMessages].sort((a, b) => (b.m1_ctr_pct || 0) - (a.m1_ctr_pct || 0))
   const top = sorted.slice(0, Math.ceil(sorted.length / 2))
@@ -16,15 +32,45 @@ function neutralCheck(withMessages, patterns) {
 }
 
 function patternStats(withMessages, patterns) {
-  const patternsWithNeutral = neutralCheck(withMessages, patterns)
-  return patternsWithNeutral.map(p => {
+  return neutralCheck(withMessages, patterns).map(p => {
     const matched = withMessages.filter(f => f.m1_message && p.test(f.m1_message))
     const notMatched = withMessages.filter(f => !f.m1_message || !p.test(f.m1_message))
     const mAvg = matched.length ? matched.reduce((s, f) => s + (f.m1_ctr_pct || 0), 0) / matched.length : null
     const nAvg = notMatched.length ? notMatched.reduce((s, f) => s + (f.m1_ctr_pct || 0), 0) / notMatched.length : null
     const delta = mAvg != null && nAvg != null ? +(mAvg - nAvg).toFixed(1) : null
-    return { ...p, count: matched.length, matchedAvg: mAvg ? +mAvg.toFixed(1) : null, notMatchedAvg: nAvg ? +nAvg.toFixed(1) : null, delta }
-  }).filter(p => p.count > 0).sort((a, b) => (b.delta || 0) - (a.delta || 0))
+    return {
+      ...p,
+      count: matched.length,
+      compareCount: notMatched.length,
+      matchedAvg: mAvg != null ? +mAvg.toFixed(1) : null,
+      notMatchedAvg: nAvg != null ? +nAvg.toFixed(1) : null,
+      delta,
+    }
+  })
+  .filter(p => p.count >= MIN_PATTERN_MATCHES && p.compareCount >= MIN_PATTERN_MATCHES && p.delta != null)
+  .sort((a, b) => (b.delta || 0) - (a.delta || 0))
+}
+
+function BarRow({ label, value, max = 80, sub, accentLow = 30, accentHigh = 60, trailing }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+      <div style={{ fontSize: 13, color: 'var(--text)', minWidth: 190 }}>{label}</div>
+      <div style={{ flex: 1, height: 6, background: 'var(--border)', borderRadius: 3, overflow: 'hidden' }}>
+        <div style={{ height: '100%', width: `${Math.min(100, (value || 0) / max * 100)}%`, background: colorFor(value, accentLow, accentHigh), borderRadius: 3 }} />
+      </div>
+      <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: colorFor(value, accentLow, accentHigh), fontWeight: 700, minWidth: 52, textAlign: 'right' }}>{pct(value)}</div>
+      {sub && <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--muted)', minWidth: 70 }}>{sub}</div>}
+      {trailing}
+    </div>
+  )
+}
+
+function NotEnoughData({ children }) {
+  return (
+    <div className="card">
+      <div style={{ color: 'var(--muted)', fontFamily: 'var(--mono)', fontSize: 12, lineHeight: 1.7 }}>{children}</div>
+    </div>
+  )
 }
 
 export default function MessageIntel() {
@@ -38,10 +84,7 @@ export default function MessageIntel() {
 
   useEffect(() => {
     getFunnels()
-      .then(funnels => {
-        setRawFunnels(funnels)
-        setData(computeOverview(funnels))
-      })
+      .then(funnels => { setRawFunnels(funnels); setData(computeOverview(funnels)) })
       .catch(console.error)
       .finally(() => setLoading(false))
   }, [])
@@ -52,27 +95,29 @@ export default function MessageIntel() {
     const funnelRows = filteredFunnels
       .filter(f => f.m1_message)
       .sort((a, b) => (b.m1_ctr_pct || 0) - (a.m1_ctr_pct || 0))
-      .map(f => `- Message: "${f.m1_message}" | CTA: "${f.m1_cta || 'N/A'}" -> CTR: ${f.m1_ctr_pct ?? 'N/A'}%, Open: ${f.m1_open_rate_pct ?? 'N/A'}%, Funnel CR: ${f.funnel_cr_pct ?? 'N/A'}%, Steps: ${f.step_count}`)
+      .map(f => `- Message: "${f.m1_message}" | CTA: "${f.m1_cta || 'N/A'}" -> M1 CTR ${f.m1_ctr_pct ?? 'N/A'}%, Open ${f.m1_open_rate_pct ?? 'N/A'}%, Funnel CR ${f.funnel_cr_pct ?? 'N/A'}%, Steps ${f.step_count}, Volume ${f.effective_sent ?? 'N/A'}`)
       .join('\n')
 
     const prompt = `You are a conversion copywriting expert analyzing ManyChat DM funnel performance for a music artist. ${filter !== 'all' ? `These are all "${filter}" funnels.` : 'These funnels span all types.'}
 
-Here are all message variations ranked by CTR with actual performance data:
+Message variations ranked by CTR with performance data:
 
 ${funnelRows}
 
-Overall averages: M1 CTR ${averages.m1_ctr_pct}%, Funnel CR ${averages.funnel_cr_pct}%
+Volume weighted averages: M1 CTR ${averages.m1_ctr_pct}%, Funnel CR ${averages.funnel_cr_pct}%
 
-First, check whether any wording or phrases appear in BOTH the top and bottom converters. If so, state this at the top as a neutral pattern.
+Weight your conclusions by the Volume figure. A funnel with 30 sends is not evidence on the level of one with 3000, and you should say so plainly rather than treating them equally.
+
+First state any wording that appears in BOTH top and bottom converters as a neutral pattern that does not drive conversion.
 
 Then analyze:
-1. Message body patterns: Which specific words or phrases in the highest-converting messages drive clicks? Quote them with their CTR.
-2. CTA button patterns: Which CTA text converts best and which should be avoided?
-3. Combined patterns: Message body and CTA combinations that work especially well together.
-4. The single most impactful change to make on the next funnel.
-5. Two new M1 message and CTA combinations to A/B test, written in the same casual voice as the existing messages.
+1. Message body patterns in the highest converters. Quote the copy and cite the CTR.
+2. CTA button patterns that convert best and worst.
+3. Body and CTA combinations that work well together.
+4. The single most impactful change for the next funnel.
+5. Two new M1 message and CTA combinations to A/B test, in the same casual voice.
 
-Be specific. Quote actual copy. Reference actual CTR numbers. No emojis. Max 400 words.`
+Be specific. Quote actual copy. Reference actual numbers. No emojis. Max 400 words.`
 
     try {
       const resp = await fetch('/.netlify/functions/analyze', {
@@ -107,13 +152,12 @@ Be specific. Quote actual copy. Reference actual CTR numbers. No emojis. Max 400
     { label: '"i\'ll send you"', test: m => m.toLowerCase().includes("i'll send you") },
     { label: '"click below"', test: m => m.toLowerCase().includes('click below') },
     { label: '"click here"', test: m => m.toLowerCase().includes('click here') },
-    { label: 'Song title in quotes', test: m => /[""].+[""]/.test(m) },
+    { label: 'Song title in quotes', test: m => QUOTED.test(m) },
     { label: 'Pre-save or exclusive framing', test: m => /before|public|early|exclusive|pre.?save/i.test(m) },
     { label: 'Short message under 70 characters', test: m => m.length < 70 },
-    { label: 'Ends with punctuation or emoji', test: m => /[\!\)\:🖤🧡]+\s*$/.test(m.trim()) },
-    { label: 'First person voice', test: m => /\bi\b|\bi'll\b|\bi'm\b/i.test(m) },
-    { label: 'Question opener', test: m => m.trim().startsWith('have') || m.trim().startsWith('did') || m.trim().startsWith('do you') || m.trim().startsWith('are you') || /\?/.test(m.slice(0, 40)) },
+    { label: 'Question opener', test: m => /^(have|did|do you|are you|where|what|who)\b/i.test(m.trim()) || /\?/.test(m.slice(0, 60)) },
     { label: 'Contains emoji in body', test: m => /[\u{1F300}-\u{1F9FF}]/u.test(m) },
+    { label: 'Mission or manifesto framing', test: m => /mission|movement|we on a|i make music for|rebuild|culture/i.test(m) },
   ]
 
   const stats = patternStats(withMsgs, PATTERNS)
@@ -122,73 +166,73 @@ Be specific. Quote actual copy. Reference actual CTR numbers. No emojis. Max 400
   const negative = stats.filter(p => !p.isNeutral && (p.delta || 0) < -2)
   const rowStyle = { padding: '8px 0', borderBottom: '1px solid var(--border)', fontSize: 13, lineHeight: 1.7 }
 
-  // ── FUNNEL STRUCTURE ANALYSIS ─────────────────────────────────────────────
+  // ── STRUCTURE ─────────────────────────────────────────────────────────────
   const withCr = filtered.filter(f => f.funnel_cr_pct != null && f.step_count > 0)
 
-  // Step count vs CR
-  const stepGroups = {}
-  withCr.forEach(f => {
-    const k = f.step_count
-    if (!stepGroups[k]) stepGroups[k] = []
-    stepGroups[k].push(f.funnel_cr_pct)
-  })
-  const stepCrData = Object.entries(stepGroups)
-    .map(([steps, crs]) => ({
-      steps: parseInt(steps),
-      avgCr: +(crs.reduce((a, b) => a + b, 0) / crs.length).toFixed(1),
-      count: crs.length
-    }))
-    .sort((a, b) => a.steps - b.steps)
+  const groupAvg = (items, keyFn, valFn) => {
+    const g = {}
+    items.forEach(f => {
+      const k = keyFn(f)
+      if (k == null) return
+      if (!g[k]) g[k] = []
+      g[k].push(valFn(f))
+    })
+    return Object.entries(g)
+      .map(([k, vals]) => ({ key: Number(k), avg: +(vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1), count: vals.length }))
+      .sort((a, b) => a.key - b.key)
+  }
 
-  // Average CTR by step position across all funnels
+  const stepCrData = groupAvg(withCr, f => f.step_count, f => f.funnel_cr_pct)
+  const branchCrData = groupAvg(withCr, f => f.branch_count, f => f.funnel_cr_pct)
+
+  // FIX 5: per step CTR, not cumulative, so this measures message strength
   const stepPositionData = []
   for (let i = 1; i <= data.maxSteps; i++) {
-    const vals = filtered.map(f => f[`m${i}_ctr_pct`]).filter(v => v != null)
+    const vals = filtered.map(f => f[`m${i}_step_ctr_pct`]).filter(v => v != null)
     if (vals.length) {
       stepPositionData.push({
         position: i,
         avgCtr: +(vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1),
-        count: vals.length
+        count: vals.length,
       })
     }
   }
-
-  // Drop-off between consecutive steps
-  const dropOffData = []
-  for (let i = 1; i < data.maxSteps; i++) {
-    const pairs = filtered.filter(f => f[`m${i}_ctr_pct`] != null && f[`m${i + 1}_ctr_pct`] != null)
-    if (pairs.length) {
-      const avgDrop = pairs.reduce((s, f) => s + (f[`m${i}_ctr_pct`] - f[`m${i + 1}_ctr_pct`]), 0) / pairs.length
-      dropOffData.push({ from: i, to: i + 1, avgDrop: +avgDrop.toFixed(1), count: pairs.length })
+  let steepestDrop = null
+  for (let i = 1; i < stepPositionData.length; i++) {
+    const drop = stepPositionData[i - 1].avgCtr - stepPositionData[i].avgCtr
+    if (!steepestDrop || drop > steepestDrop.drop) {
+      steepestDrop = { from: stepPositionData[i - 1].position, to: stepPositionData[i].position, drop: +drop.toFixed(1) }
     }
   }
-  const steepestDrop = dropOffData.sort((a, b) => b.avgDrop - a.avgDrop)[0]
 
-  // M1 CTR as predictor of funnel CR
-  const withBoth = filtered.filter(f => f.m1_ctr_pct != null && f.funnel_cr_pct != null)
-  let m1CrCorrelation = null
-  if (withBoth.length >= 3) {
+  // FIX 4: correlate M1 CTR against downstream CR (no shared denominator),
+  // and only once there are enough funnels for a coefficient to mean anything
+  const withBoth = filtered.filter(f => f.m1_ctr_pct != null && f.downstream_cr_pct != null)
+  let corr = null
+  if (withBoth.length >= MIN_CORRELATION_N) {
     const n = withBoth.length
-    const sumX = withBoth.reduce((s, f) => s + f.m1_ctr_pct, 0)
-    const sumY = withBoth.reduce((s, f) => s + f.funnel_cr_pct, 0)
-    const sumXY = withBoth.reduce((s, f) => s + f.m1_ctr_pct * f.funnel_cr_pct, 0)
-    const sumX2 = withBoth.reduce((s, f) => s + f.m1_ctr_pct ** 2, 0)
-    const sumY2 = withBoth.reduce((s, f) => s + f.funnel_cr_pct ** 2, 0)
-    const num = n * sumXY - sumX * sumY
-    const den = Math.sqrt((n * sumX2 - sumX ** 2) * (n * sumY2 - sumY ** 2))
-    m1CrCorrelation = den > 0 ? +(num / den).toFixed(2) : null
+    const X = withBoth.map(f => f.m1_ctr_pct)
+    const Y = withBoth.map(f => f.downstream_cr_pct)
+    const sX = X.reduce((a, b) => a + b, 0), sY = Y.reduce((a, b) => a + b, 0)
+    const sXY = X.reduce((a, x, i) => a + x * Y[i], 0)
+    const sX2 = X.reduce((a, x) => a + x * x, 0), sY2 = Y.reduce((a, y) => a + y * y, 0)
+    const den = Math.sqrt((n * sX2 - sX ** 2) * (n * sY2 - sY ** 2))
+    corr = den > 0 ? +((n * sXY - sX * sY) / den).toFixed(2) : null
   }
 
-  // Top/bottom quartile step count comparison
   const sortedByCr = [...withCr].sort((a, b) => b.funnel_cr_pct - a.funnel_cr_pct)
-  const topQ = sortedByCr.slice(0, Math.ceil(sortedByCr.length / 4))
-  const botQ = sortedByCr.slice(-Math.ceil(sortedByCr.length / 4))
+  const canQuartile = sortedByCr.length >= 4
+  const qSize = Math.max(1, Math.floor(sortedByCr.length / 4))
+  const topQ = canQuartile ? sortedByCr.slice(0, qSize) : []
+  const botQ = canQuartile ? sortedByCr.slice(-qSize) : []
   const topAvgSteps = topQ.length ? +(topQ.reduce((s, f) => s + f.step_count, 0) / topQ.length).toFixed(1) : null
   const botAvgSteps = botQ.length ? +(botQ.reduce((s, f) => s + f.step_count, 0) / botQ.length).toFixed(1) : null
 
-  // ── AUDIENCE SEGMENTATION ─────────────────────────────────────────────────
-  // Streaming platform distribution from branch metadata in raw funnels
-  const streamingPlatforms = {}
+  const unweightedCount = filtered.filter(f => f.funnel_cr_pct != null && !f.cr_is_weighted).length
+
+  // ── AUDIENCE ──────────────────────────────────────────────────────────────
+  const streamingTotals = {}
+  let streamingGrandTotal = 0
   const communityJoinRates = []
   const heardMusicRatios = []
 
@@ -197,73 +241,63 @@ Be specific. Quote actual copy. Reference actual CTR numbers. No emojis. Max 400
     f.connections.forEach(conn => {
       if (!conn.branch_metadata) return
       try {
-        const meta = typeof conn.branch_metadata === 'string'
-          ? JSON.parse(conn.branch_metadata)
-          : conn.branch_metadata
-        if (!meta.branches) return
-
+        const meta = typeof conn.branch_metadata === 'string' ? JSON.parse(conn.branch_metadata) : conn.branch_metadata
+        if (!meta?.branches?.length) return
         const branches = meta.branches
         const totalSent = meta.total_sent_at_split || branches.reduce((s, b) => s + (b.sent || 0), 0)
+        if (!totalSent) return
 
-        // Detect streaming platform splits
         const streamingLabels = ['spotify', 'apple', 'youtube', 'tidal', 'audiomack', 'amazon', 'soundcloud']
-        const isStreamingSplit = branches.some(b => streamingLabels.some(p => b.label?.toLowerCase().includes(p)))
-        if (isStreamingSplit && totalSent > 0) {
+        const isStreaming = branches.some(b => streamingLabels.some(p => b.label?.toLowerCase().includes(p)))
+        if (isStreaming) {
+          // FIX: accumulate a single shared denominator so shares sum to 100
           branches.forEach(b => {
             if (!b.label || !b.sent) return
-            const platform = streamingLabels.find(p => b.label.toLowerCase().includes(p)) || 'other'
-            if (!streamingPlatforms[platform]) streamingPlatforms[platform] = { sent: 0, total: 0 }
-            streamingPlatforms[platform].sent += b.sent
-            streamingPlatforms[platform].total += totalSent
+            const platform = streamingLabels.find(p => b.label.toLowerCase().includes(p))
+            if (!platform) return
+            streamingTotals[platform] = (streamingTotals[platform] || 0) + b.sent
+            streamingGrandTotal += b.sent
           })
         }
 
-        // Detect heard music before splits
         const heardLabels = ['yes', 'heard', 'have', 'listened']
-        const isHeardSplit = branches.some(b => heardLabels.some(l => b.label?.toLowerCase().includes(l)))
-        if (isHeardSplit && totalSent > 0) {
-          const yesBranch = branches.find(b => heardLabels.some(l => b.label?.toLowerCase().includes(l)))
-          if (yesBranch?.sent) heardMusicRatios.push(yesBranch.sent / totalSent * 100)
+        if (branches.some(b => heardLabels.some(l => b.label?.toLowerCase().includes(l)))) {
+          const yes = branches.find(b => heardLabels.some(l => b.label?.toLowerCase().includes(l)))
+          if (yes?.sent) heardMusicRatios.push(yes.sent / totalSent * 100)
         }
 
-        // Detect community/engagement splits
         const communityLabels = ['discord', 'community', 'joined', 'member', 'group', 'patreon', 'whatsapp']
-        const isCommunity = branches.some(b => communityLabels.some(l => b.label?.toLowerCase().includes(l)))
-        if (isCommunity && totalSent > 0) {
-          const yesBranch = branches.find(b => communityLabels.some(l => b.label?.toLowerCase().includes(l)))
-          if (yesBranch?.sent) communityJoinRates.push(yesBranch.sent / totalSent * 100)
+        if (branches.some(b => communityLabels.some(l => b.label?.toLowerCase().includes(l)))) {
+          const yes = branches.find(b => communityLabels.some(l => b.label?.toLowerCase().includes(l)))
+          if (yes?.sent) communityJoinRates.push(yes.sent / totalSent * 100)
         }
       } catch {}
     })
   })
 
-  const streamingEntries = Object.entries(streamingPlatforms)
-    .map(([name, d]) => ({ name, pct: d.total > 0 ? +(d.sent / d.total * 100).toFixed(1) : 0 }))
+  const streamingEntries = Object.entries(streamingTotals)
+    .map(([name, sent]) => ({ name, pct: streamingGrandTotal ? +(sent / streamingGrandTotal * 100).toFixed(1) : 0, sent }))
     .sort((a, b) => b.pct - a.pct)
-  const avgHeardRatio = heardMusicRatios.length
-    ? +(heardMusicRatios.reduce((a, b) => a + b, 0) / heardMusicRatios.length).toFixed(1) : null
-  const avgCommunityRate = communityJoinRates.length
-    ? +(communityJoinRates.reduce((a, b) => a + b, 0) / communityJoinRates.length).toFixed(1) : null
+  const avgHeardRatio = heardMusicRatios.length ? +(heardMusicRatios.reduce((a, b) => a + b, 0) / heardMusicRatios.length).toFixed(1) : null
+  const avgCommunityRate = communityJoinRates.length ? +(communityJoinRates.reduce((a, b) => a + b, 0) / communityJoinRates.length).toFixed(1) : null
 
-  // ── MESSAGE LENGTH ANALYSIS ───────────────────────────────────────────────
+  // ── LENGTH ────────────────────────────────────────────────────────────────
   const lengthBuckets = [
-    { label: 'Very short (< 60 chars)', test: m => m.length < 60 },
-    { label: 'Short (60–100 chars)', test: m => m.length >= 60 && m.length < 100 },
-    { label: 'Medium (100–160 chars)', test: m => m.length >= 100 && m.length < 160 },
+    { label: 'Very short (under 60 chars)', test: m => m.length < 60 },
+    { label: 'Short (60 to 100 chars)', test: m => m.length >= 60 && m.length < 100 },
+    { label: 'Medium (100 to 160 chars)', test: m => m.length >= 100 && m.length < 160 },
     { label: 'Long (160+ chars)', test: m => m.length >= 160 },
   ]
   const lengthData = lengthBuckets.map(b => {
     const matched = withMsgs.filter(f => f.m1_message && b.test(f.m1_message))
-    const avgCtr = matched.length ? +(matched.reduce((s, f) => s + (f.m1_ctr_pct || 0), 0) / matched.length).toFixed(1) : null
-    return { label: b.label, avgCtr, count: matched.length }
-  }).filter(d => d.count > 0)
+    return {
+      label: b.label,
+      avgCtr: matched.length ? +(matched.reduce((s, f) => s + (f.m1_ctr_pct || 0), 0) / matched.length).toFixed(1) : null,
+      count: matched.length,
+    }
+  }).filter(d => d.count >= MIN_BUCKET)
 
-  const TABS = [
-    ['ranking', 'M1 Rankings'],
-    ['patterns', 'Wording Patterns'],
-    ['structure', 'Funnel Structure'],
-    ['audience', 'Audience Signals'],
-  ]
+  const TABS = [['ranking', 'M1 Rankings'], ['patterns', 'Wording Patterns'], ['structure', 'Funnel Structure'], ['audience', 'Audience Signals']]
 
   return (
     <div>
@@ -286,88 +320,62 @@ Be specific. Quote actual copy. Reference actual CTR numbers. No emojis. Max 400
         </div>
       </div>
 
-      {neutral.length > 0 && (
-        <div style={{ background: 'rgba(136,136,170,0.08)', border: '1px solid var(--border)', borderRadius: 10, padding: '14px 18px', marginBottom: 24, fontSize: 13, lineHeight: 1.6 }}>
-          <strong style={{ color: 'var(--text)' }}>Neutral patterns detected</strong> — the following wording appears equally in top and bottom converters and does not measurably influence conversion:{' '}
-          {neutral.map((p, i) => (
-            <span key={i}><strong style={{ color: 'var(--text)' }}>{p.label}</strong>{i < neutral.length - 1 ? ', ' : ''}</span>
-          ))}. Do not rely on these as conversion levers.
+      {withMsgs.length < 6 && (
+        <div style={{ background: 'rgba(255,209,102,0.07)', border: '1px solid rgba(255,209,102,0.25)', borderRadius: 10, padding: '12px 18px', marginBottom: 20, fontSize: 13, color: 'var(--text)', lineHeight: 1.6 }}>
+          <strong style={{ color: 'var(--gold)' }}>Small sample</strong> — {withMsgs.length} funnel{withMsgs.length === 1 ? '' : 's'} in this view. Patterns need at least {MIN_PATTERN_MATCHES} funnels on each side of a comparison before they are reported, so most sections stay quiet until you add more.
         </div>
       )}
 
-      {/* Tab bar */}
+      {neutral.length > 0 && (
+        <div style={{ background: 'rgba(136,136,170,0.08)', border: '1px solid var(--border)', borderRadius: 10, padding: '14px 18px', marginBottom: 24, fontSize: 13, lineHeight: 1.6 }}>
+          <strong style={{ color: 'var(--text)' }}>Neutral patterns detected</strong> — this wording appears at similar rates in top and bottom converters and does not measurably move conversion:{' '}
+          {neutral.map((p, i) => <span key={i}><strong style={{ color: 'var(--text)' }}>{p.label}</strong>{i < neutral.length - 1 ? ', ' : ''}</span>)}. Do not rely on these as levers.
+        </div>
+      )}
+
       <div style={{ display: 'flex', gap: 8, marginBottom: 24, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: 4, width: 'fit-content' }}>
         {TABS.map(([id, label]) => (
-          <button key={id} onClick={() => setTab(id)}
-            className={'btn btn-sm ' + (tab === id ? 'btn-primary' : 'btn-ghost')}
-            style={{ border: 'none' }}>{label}</button>
+          <button key={id} onClick={() => setTab(id)} className={'btn btn-sm ' + (tab === id ? 'btn-primary' : 'btn-ghost')} style={{ border: 'none' }}>{label}</button>
         ))}
       </div>
 
-      {/* ── M1 RANKINGS TAB ── */}
       {tab === 'ranking' && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
-          <div className="card">
-            <div className="card-title">Top Converting M1 Messages</div>
-            {ranked.slice(0, 7).map((f, i) => (
-              <div key={f.id} style={{ display: 'flex', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
-                <div style={{ width: 24, height: 24, borderRadius: 6, background: i === 0 ? 'rgba(255,209,102,0.2)' : 'var(--surface2)', color: i === 0 ? 'var(--gold)' : 'var(--muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700, flexShrink: 0, marginTop: 2 }}>{i + 1}</div>
-                <div style={{ flex: 1 }}>
-                  <strong style={{ fontSize: 13, color: 'var(--text)' }}>{f.name}</strong>
-                  <div style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic', lineHeight: 1.5, margin: '4px 0', borderLeft: '2px solid var(--border)', paddingLeft: 8 }}>"{f.m1_message}"</div>
-                  {f.m1_cta && <div style={{ fontSize: 11, color: 'var(--accent3)', fontFamily: 'var(--mono)', marginBottom: 4 }}>CTA: "{f.m1_cta}"</div>}
-                  <div style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>
-                    <span style={{ color: colorFor(f.m1_ctr_pct, 30, 60), fontWeight: 700 }}>{pct(f.m1_ctr_pct)} CTR</span>
-                    <span style={{ color: 'var(--muted)', margin: '0 6px' }}>·</span>
-                    <span style={{ color: 'var(--muted)' }}>{pct(f.m1_open_rate_pct)} open</span>
-                    <span style={{ color: 'var(--muted)', margin: '0 6px' }}>·</span>
-                    <span style={{ color: 'var(--muted)' }}>{(f.effective_sent || f.total_sent || 0).toLocaleString()} sent</span>
+          {[['Top Converting M1 Messages', ranked.slice(0, 7), false], ['Lowest Converting M1 Messages', bottom, true]].map(([title, list, isBottom]) => (
+            <div className="card" key={title}>
+              <div className="card-title">{title}</div>
+              {list.map((f, i) => (
+                <div key={f.id} style={{ display: 'flex', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
+                  <div style={{ width: 24, height: 24, borderRadius: 6, background: !isBottom && i === 0 ? 'rgba(255,209,102,0.2)' : 'var(--surface2)', color: isBottom ? 'var(--accent2)' : (i === 0 ? 'var(--gold)' : 'var(--muted)'), display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700, flexShrink: 0, marginTop: 2 }}>{i + 1}</div>
+                  <div style={{ flex: 1 }}>
+                    <strong style={{ fontSize: 13, color: 'var(--text)' }}>{f.name}</strong>
+                    <div style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic', lineHeight: 1.5, margin: '4px 0', borderLeft: '2px solid var(--border)', paddingLeft: 8 }}>"{f.m1_message}"</div>
+                    {f.m1_cta && <div style={{ fontSize: 11, color: isBottom ? '#ff8099' : 'var(--accent3)', fontFamily: 'var(--mono)', marginBottom: 4 }}>CTA: "{f.m1_cta}"</div>}
+                    <div style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>
+                      <span style={{ color: colorFor(f.m1_ctr_pct, 30, 60), fontWeight: 700 }}>{pct(f.m1_ctr_pct)} CTR</span>
+                      <span style={{ color: 'var(--muted)', margin: '0 6px' }}>·</span>
+                      <span style={{ color: 'var(--muted)' }}>{(f.effective_sent || 0).toLocaleString()} sent</span>
+                      {(f.effective_sent || 0) < 100 && <span style={{ color: 'var(--gold)', marginLeft: 6 }}>low volume</span>}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
-          <div className="card">
-            <div className="card-title">Lowest Converting M1 Messages</div>
-            {bottom.map((f, i) => (
-              <div key={f.id} style={{ display: 'flex', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
-                <div style={{ width: 24, height: 24, borderRadius: 6, background: 'var(--surface2)', color: 'var(--accent2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700, flexShrink: 0, marginTop: 2 }}>{i + 1}</div>
-                <div style={{ flex: 1 }}>
-                  <strong style={{ fontSize: 13, color: 'var(--text)' }}>{f.name}</strong>
-                  <div style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic', lineHeight: 1.5, margin: '4px 0', borderLeft: '2px solid var(--border)', paddingLeft: 8 }}>"{f.m1_message}"</div>
-                  {f.m1_cta && <div style={{ fontSize: 11, color: '#ff8099', fontFamily: 'var(--mono)', marginBottom: 4 }}>CTA: "{f.m1_cta}"</div>}
-                  <div style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>
-                    <span style={{ color: colorFor(f.m1_ctr_pct, 30, 60), fontWeight: 700 }}>{pct(f.m1_ctr_pct)} CTR</span>
-                    <span style={{ color: 'var(--muted)', margin: '0 6px' }}>·</span>
-                    <span style={{ color: 'var(--muted)' }}>{(f.effective_sent || f.total_sent || 0).toLocaleString()} sent</span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          ))}
         </div>
       )}
 
-      {/* ── WORDING PATTERNS TAB ── */}
       {tab === 'patterns' && (
         <div>
-          {/* Message length */}
-          <div className="card" style={{ marginBottom: 16 }}>
-            <div className="card-title">Message Length vs M1 CTR</div>
-            <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', marginBottom: 14 }}>
-              Average M1 CTR by message character count bucket
-            </div>
-            {lengthData.map((d, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
-                <div style={{ fontSize: 13, color: 'var(--text)', minWidth: 200 }}>{d.label}</div>
-                <div style={{ flex: 1, height: 6, background: 'var(--border)', borderRadius: 3, overflow: 'hidden' }}>
-                  <div style={{ height: '100%', width: `${Math.min(100, (d.avgCtr || 0) / 80 * 100)}%`, background: colorFor(d.avgCtr, 30, 60), borderRadius: 3 }} />
-                </div>
-                <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: colorFor(d.avgCtr, 30, 60), fontWeight: 700, minWidth: 50, textAlign: 'right' }}>{pct(d.avgCtr)}</div>
-                <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--muted)', minWidth: 60 }}>{d.count} funnel{d.count !== 1 ? 's' : ''}</div>
+          {lengthData.length > 0 ? (
+            <div className="card" style={{ marginBottom: 16 }}>
+              <div className="card-title">Message Length vs M1 CTR</div>
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', marginBottom: 14 }}>
+                Buckets with fewer than {MIN_BUCKET} funnels are hidden
               </div>
-            ))}
-          </div>
+              {lengthData.map((d, i) => <BarRow key={i} label={d.label} value={d.avgCtr} sub={`${d.count} funnel${d.count !== 1 ? 's' : ''}`} />)}
+            </div>
+          ) : null}
 
           {positive.length > 0 && (
             <div className="card" style={{ marginBottom: 16 }}>
@@ -375,7 +383,7 @@ Be specific. Quote actual copy. Reference actual CTR numbers. No emojis. Max 400
               {positive.map((p, i) => (
                 <div key={i} style={rowStyle}>
                   <strong style={{ color: 'var(--accent3)' }}>{p.label}</strong>
-                  {' '}— {p.count} funnels use this, averaging <strong style={{ color: 'var(--accent3)' }}>{pct(p.matchedAvg)} CTR</strong> vs {pct(p.notMatchedAvg)} without it (<strong>+{p.delta}pp</strong>)
+                  {' '}— {p.count} funnels use this at <strong style={{ color: 'var(--accent3)' }}>{pct(p.matchedAvg)}</strong> average CTR vs {pct(p.notMatchedAvg)} across the {p.compareCount} without it ({ppLabel(p.delta)})
                 </div>
               ))}
             </div>
@@ -384,11 +392,10 @@ Be specific. Quote actual copy. Reference actual CTR numbers. No emojis. Max 400
           {neutral.length > 0 && (
             <div className="card" style={{ marginBottom: 16 }}>
               <div className="card-title">Neutral Patterns — No Measurable Impact</div>
-              <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', marginBottom: 12 }}>These appear in both top and bottom converters. The data shows no meaningful CTR impact either way.</div>
               {neutral.map((p, i) => (
                 <div key={i} style={rowStyle}>
                   <strong style={{ color: 'var(--text)' }}>{p.label}</strong>
-                  {' '}— appears in {Math.round(p.topRate * 100)}% of top converters and {Math.round(p.bottomRate * 100)}% of bottom converters. Delta: <strong>{p.delta != null ? (p.delta > 0 ? '+' : '') + p.delta + 'pp' : 'approx 0pp'}</strong>
+                  {' '}— in {Math.round(p.topRate * 100)}% of top converters and {Math.round(p.bottomRate * 100)}% of bottom converters. Delta {ppLabel(p.delta)}
                 </div>
               ))}
             </div>
@@ -400,106 +407,115 @@ Be specific. Quote actual copy. Reference actual CTR numbers. No emojis. Max 400
               {negative.map((p, i) => (
                 <div key={i} style={rowStyle}>
                   <strong style={{ color: 'var(--accent2)' }}>{p.label}</strong>
-                  {' '}— averages <strong style={{ color: 'var(--accent2)' }}>{pct(p.matchedAvg)} CTR</strong> vs {pct(p.notMatchedAvg)} without it (<strong>{p.delta}pp</strong>)
+                  {' '}— {p.count} funnels average <strong style={{ color: 'var(--accent2)' }}>{pct(p.matchedAvg)}</strong> CTR vs {pct(p.notMatchedAvg)} across the {p.compareCount} without it ({ppLabel(p.delta)})
                 </div>
               ))}
             </div>
           )}
 
-          {positive.length === 0 && neutral.length === 0 && negative.length === 0 && (
-            <div className="card"><div style={{ color: 'var(--muted)', fontFamily: 'var(--mono)', fontSize: 12 }}>Not enough data yet. Add more funnels for pattern detection.</div></div>
+          {positive.length === 0 && neutral.length === 0 && negative.length === 0 && lengthData.length === 0 && (
+            <NotEnoughData>
+              No pattern meets the reporting threshold yet. A pattern needs at least {MIN_PATTERN_MATCHES} funnels containing it and {MIN_PATTERN_MATCHES} without it before a verdict is shown.
+            </NotEnoughData>
           )}
         </div>
       )}
 
-      {/* ── FUNNEL STRUCTURE TAB ── */}
       {tab === 'structure' && (
         <div>
-          {/* M1 CTR as CR predictor */}
-          {m1CrCorrelation != null && (
-            <div className="card" style={{ marginBottom: 16 }}>
-              <div className="card-title">M1 CTR as a Predictor of Funnel CR</div>
-              <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.8 }}>
-                Correlation coefficient: <strong style={{ color: colorFor(Math.abs(m1CrCorrelation) * 100, 40, 70) }}>{m1CrCorrelation}</strong>
-                {' '}— {Math.abs(m1CrCorrelation) >= 0.7
-                  ? 'Strong correlation. M1 CTR is a reliable predictor of end-to-end conversion. Optimizing your first message is your highest-leverage move.'
-                  : Math.abs(m1CrCorrelation) >= 0.4
-                  ? 'Moderate correlation. M1 CTR matters but downstream steps also have significant influence on end-to-end conversion.'
-                  : 'Weak correlation. End-to-end conversion is driven more by downstream steps than the first message for your funnels.'}
-              </div>
-              {topAvgSteps != null && botAvgSteps != null && (
-                <div style={{ marginTop: 14, padding: '12px 0', borderTop: '1px solid var(--border)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                  <div>
-                    <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>Top 25% converters</div>
-                    <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--accent3)' }}>{topAvgSteps} <span style={{ fontSize: 13, color: 'var(--muted)', fontWeight: 400 }}>avg steps</span></div>
-                  </div>
-                  <div>
-                    <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>Bottom 25% converters</div>
-                    <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--accent2)' }}>{botAvgSteps} <span style={{ fontSize: 13, color: 'var(--muted)', fontWeight: 400 }}>avg steps</span></div>
-                  </div>
-                </div>
-              )}
+          {unweightedCount > 0 && (
+            <div style={{ background: 'rgba(255,209,102,0.07)', border: '1px solid rgba(255,209,102,0.25)', borderRadius: 10, padding: '12px 18px', marginBottom: 16, fontSize: 13, color: 'var(--text)', lineHeight: 1.6 }}>
+              <strong style={{ color: 'var(--gold)' }}>{unweightedCount} funnel{unweightedCount === 1 ? '' : 's'} using majority path CR</strong> — these were uploaded before branch capture, so their end to end CR counts only the largest branch and understates the true result. Re-upload their screenshots to get the weighted figure.
             </div>
           )}
 
-          {/* Step count vs CR */}
+          <div className="card" style={{ marginBottom: 16 }}>
+            <div className="card-title">M1 CTR as a Predictor of Downstream CR</div>
+            {corr != null ? (
+              <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.8 }}>
+                Correlation across {withBoth.length} funnels: <strong style={{ color: colorFor(Math.abs(corr) * 100, 40, 70) }}>{corr}</strong>
+                {' '}— {Math.abs(corr) >= 0.7
+                  ? 'Strong. Funnels that win at M1 keep winning downstream, so first message copy is your highest leverage move.'
+                  : Math.abs(corr) >= 0.4
+                  ? 'Moderate. M1 matters but downstream steps carry real independent weight.'
+                  : 'Weak. A strong first message does not predict what happens after it. Optimise the middle of the funnel.'}
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', marginTop: 10 }}>
+                  Measured against downstream CR (terminal clicks divided by M1 clicks) rather than funnel CR, which shares a denominator with M1 CTR and would correlate on arithmetic alone.
+                </div>
+              </div>
+            ) : (
+              <div style={{ color: 'var(--muted)', fontFamily: 'var(--mono)', fontSize: 12, lineHeight: 1.7 }}>
+                Needs {MIN_CORRELATION_N} funnels before a coefficient is meaningful. Currently {withBoth.length}.
+              </div>
+            )}
+
+            {topAvgSteps != null && botAvgSteps != null && (
+              <div style={{ marginTop: 14, padding: '12px 0', borderTop: '1px solid var(--border)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                <div>
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>Top quartile converters</div>
+                  <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--accent3)' }}>{topAvgSteps} <span style={{ fontSize: 13, color: 'var(--muted)', fontWeight: 400 }}>avg steps</span></div>
+                </div>
+                <div>
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>Bottom quartile converters</div>
+                  <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--accent2)' }}>{botAvgSteps} <span style={{ fontSize: 13, color: 'var(--muted)', fontWeight: 400 }}>avg steps</span></div>
+                </div>
+              </div>
+            )}
+          </div>
+
           {stepCrData.length > 1 && (
             <div className="card" style={{ marginBottom: 16 }}>
-              <div className="card-title">Number of Steps vs End-to-End CR</div>
-              <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', marginBottom: 14 }}>Average funnel CR by total message step count</div>
-              {stepCrData.map((d, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
-                  <div style={{ fontSize: 13, color: 'var(--text)', minWidth: 100 }}>{d.steps} step{d.steps !== 1 ? 's' : ''}</div>
-                  <div style={{ flex: 1, height: 6, background: 'var(--border)', borderRadius: 3, overflow: 'hidden' }}>
-                    <div style={{ height: '100%', width: `${Math.min(100, (d.avgCr || 0) / 80 * 100)}%`, background: colorFor(d.avgCr, 15, 40), borderRadius: 3 }} />
-                  </div>
-                  <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: colorFor(d.avgCr, 15, 40), fontWeight: 700, minWidth: 50, textAlign: 'right' }}>{pct(d.avgCr)}</div>
-                  <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--muted)', minWidth: 60 }}>{d.count} funnel{d.count !== 1 ? 's' : ''}</div>
-                </div>
-              ))}
+              <div className="card-title">Number of Steps vs End to End CR</div>
+              {stepCrData.map((d, i) => <BarRow key={i} label={`${d.key} step${d.key !== 1 ? 's' : ''}`} value={d.avg} accentLow={15} accentHigh={40} sub={`${d.count} funnel${d.count !== 1 ? 's' : ''}`} />)}
             </div>
           )}
 
-          {/* Average CTR by step position */}
+          {branchCrData.length > 1 && (
+            <div className="card" style={{ marginBottom: 16 }}>
+              <div className="card-title">Number of Branches vs End to End CR</div>
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', marginBottom: 14 }}>
+                Does splitting the audience into personalised paths actually pay off
+              </div>
+              {branchCrData.map((d, i) => <BarRow key={i} label={d.key === 0 ? 'Linear (no branches)' : `${d.key} branch point${d.key !== 1 ? 's' : ''}`} value={d.avg} accentLow={15} accentHigh={40} sub={`${d.count} funnel${d.count !== 1 ? 's' : ''}`} />)}
+            </div>
+          )}
+
           {stepPositionData.length > 1 && (
             <div className="card" style={{ marginBottom: 16 }}>
-              <div className="card-title">Average CTR by Step Position</div>
+              <div className="card-title">Average Per Step CTR by Position</div>
               <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', marginBottom: 14 }}>
-                Where engagement drops across all your funnels
-                {steepestDrop && <span> — steepest drop-off is between <strong style={{ color: 'var(--text)' }}>M{steepestDrop.from} and M{steepestDrop.to}</strong> (avg -{steepestDrop.avgDrop}pp)</span>}
+                Each step measured against its own sent count, so this reflects message strength rather than the automatic decline of a cumulative figure
+                {steepestDrop && steepestDrop.drop > 0 && <span> — steepest fall is M{steepestDrop.from} to M{steepestDrop.to} at {steepestDrop.drop}pp</span>}
               </div>
               {stepPositionData.map((d, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
-                  <div style={{ fontSize: 13, color: 'var(--text)', minWidth: 60, fontWeight: 700 }}>M{d.position}</div>
-                  <div style={{ flex: 1, height: 6, background: 'var(--border)', borderRadius: 3, overflow: 'hidden' }}>
-                    <div style={{ height: '100%', width: `${Math.min(100, (d.avgCtr || 0) / 80 * 100)}%`, background: colorFor(d.avgCtr, 30, 60), borderRadius: 3 }} />
-                  </div>
-                  <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: colorFor(d.avgCtr, 30, 60), fontWeight: 700, minWidth: 50, textAlign: 'right' }}>{pct(d.avgCtr)}</div>
-                  <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--muted)', minWidth: 70 }}>{d.count} funnel{d.count !== 1 ? 's' : ''}</div>
-                  {i > 0 && stepPositionData[i - 1] && (
-                    <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--accent2)', minWidth: 50 }}>
-                      -{(stepPositionData[i - 1].avgCtr - d.avgCtr).toFixed(1)}pp
+                <BarRow
+                  key={i}
+                  label={`M${d.position}`}
+                  value={d.avgCtr}
+                  sub={`${d.count} funnel${d.count !== 1 ? 's' : ''}`}
+                  trailing={i > 0 ? (
+                    <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: stepPositionData[i - 1].avgCtr >= d.avgCtr ? 'var(--accent2)' : 'var(--accent3)', minWidth: 56, textAlign: 'right' }}>
+                      {ppLabel(d.avgCtr - stepPositionData[i - 1].avgCtr)}
                     </div>
-                  )}
-                </div>
+                  ) : <div style={{ minWidth: 56 }} />}
+                />
               ))}
             </div>
           )}
 
-          {stepCrData.length <= 1 && stepPositionData.length <= 1 && (
-            <div className="card"><div style={{ color: 'var(--muted)', fontFamily: 'var(--mono)', fontSize: 12 }}>Add more funnels to see structure pattern analysis.</div></div>
+          {stepCrData.length <= 1 && branchCrData.length <= 1 && stepPositionData.length <= 1 && (
+            <NotEnoughData>Add more funnels to compare structure against conversion.</NotEnoughData>
           )}
         </div>
       )}
 
-      {/* ── AUDIENCE SIGNALS TAB ── */}
       {tab === 'audience' && (
         <div>
           {streamingEntries.length > 0 && (
             <div className="card" style={{ marginBottom: 16 }}>
               <div className="card-title">Streaming Platform Distribution</div>
               <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', marginBottom: 14 }}>
-                Where your audience listens to music — across all funnels that ask the question
+                Share of {streamingGrandTotal.toLocaleString()} platform selections across every funnel that asks
               </div>
               {streamingEntries.map((d, i) => (
                 <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
@@ -507,11 +523,12 @@ Be specific. Quote actual copy. Reference actual CTR numbers. No emojis. Max 400
                   <div style={{ flex: 1, height: 6, background: 'var(--border)', borderRadius: 3, overflow: 'hidden' }}>
                     <div style={{ height: '100%', width: `${d.pct}%`, background: 'var(--accent)', borderRadius: 3 }} />
                   </div>
-                  <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text)', fontWeight: 700, minWidth: 50, textAlign: 'right' }}>{d.pct}%</div>
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text)', fontWeight: 700, minWidth: 52, textAlign: 'right' }}>{d.pct}%</div>
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--muted)', minWidth: 60 }}>{d.sent.toLocaleString()}</div>
                 </div>
               ))}
               <div style={{ marginTop: 12, fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}>
-                This tells you where to prioritize music distribution and promotion spend.
+                Use this to decide where distribution and promotion spend actually lands.
               </div>
             </div>
           )}
@@ -520,43 +537,35 @@ Be specific. Quote actual copy. Reference actual CTR numbers. No emojis. Max 400
             {avgHeardRatio != null && (
               <div className="card" style={{ marginBottom: 0 }}>
                 <div className="card-title">Heard Your Music Before</div>
-                <div style={{ fontSize: 36, fontWeight: 800, color: colorFor(avgHeardRatio, 30, 60), letterSpacing: -1, marginBottom: 8 }}>
-                  {avgHeardRatio}%
-                </div>
+                <div style={{ fontSize: 36, fontWeight: 800, color: colorFor(avgHeardRatio, 30, 60), letterSpacing: -1, marginBottom: 8 }}>{avgHeardRatio}%</div>
                 <div style={{ fontSize: 13, color: 'var(--muted)', lineHeight: 1.6 }}>
-                  of people entering your funnels have already heard your music. {avgHeardRatio >= 50
-                    ? 'Your audience quality is strong — more than half are already fans.'
-                    : 'Most entering your funnels are discovering you for the first time. Focus on strong first impressions.'}
+                  across {heardMusicRatios.length} split{heardMusicRatios.length === 1 ? '' : 's'}. {avgHeardRatio >= 50
+                    ? 'More than half already know your catalogue.'
+                    : 'Most are discovering you here, so first impressions carry the funnel.'}
                 </div>
               </div>
             )}
-
             {avgCommunityRate != null && (
               <div className="card" style={{ marginBottom: 0 }}>
                 <div className="card-title">Community Engagement Rate</div>
-                <div style={{ fontSize: 36, fontWeight: 800, color: colorFor(avgCommunityRate, 15, 35), letterSpacing: -1, marginBottom: 8 }}>
-                  {avgCommunityRate}%
-                </div>
+                <div style={{ fontSize: 36, fontWeight: 800, color: colorFor(avgCommunityRate, 15, 35), letterSpacing: -1, marginBottom: 8 }}>{avgCommunityRate}%</div>
                 <div style={{ fontSize: 13, color: 'var(--muted)', lineHeight: 1.6 }}>
-                  of people asked about your community say they are already members. {avgCommunityRate >= 30
-                    ? 'Strong community penetration among your active audience.'
-                    : 'Most of your funnel audience are not yet community members — a significant growth opportunity.'}
+                  across {communityJoinRates.length} split{communityJoinRates.length === 1 ? '' : 's'}. {avgCommunityRate >= 30
+                    ? 'Strong penetration among your active audience.'
+                    : 'Most of this audience is not in your community yet.'}
                 </div>
               </div>
             )}
           </div>
 
           {streamingEntries.length === 0 && avgHeardRatio == null && avgCommunityRate == null && (
-            <div className="card">
-              <div style={{ color: 'var(--muted)', fontFamily: 'var(--mono)', fontSize: 12 }}>
-                Audience signal data comes from funnels with multi-button splits (streaming platform selection, heard music before questions, etc.). Upload funnels with these question steps to see this analysis.
-              </div>
-            </div>
+            <NotEnoughData>
+              Audience signals come from multi button splits such as streaming platform choice or a heard my music question. Upload funnels containing those steps to populate this tab.
+            </NotEnoughData>
           )}
         </div>
       )}
 
-      {/* AI Analysis */}
       {(aiText || aiLoading) && (
         <div className="card" style={{ marginTop: 24 }}>
           <div className="card-title">

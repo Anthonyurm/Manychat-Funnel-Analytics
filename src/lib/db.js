@@ -69,20 +69,24 @@ export async function deleteStep(id) {
   if (error) throw error
 }
 
+// FIX 8: use ?? so a genuine 0 is stored as 0, not silently converted to null
 export async function upsertMetric({ step_id, sent, opened, clicked, source = 'manual' }) {
   const { data: { user } } = await supabase.auth.getUser()
-  const ctr = sent && clicked ? clicked / sent : null
-  const open_rate = sent && opened ? opened / sent : null
+  const s = sent ?? null
+  const o = opened ?? null
+  const c = clicked ?? null
+  const ctr = s != null && c != null && s > 0 ? c / s : null
+  const open_rate = s != null && o != null && s > 0 ? o / s : null
   await supabase.from('step_metrics').delete().eq('step_id', step_id)
   const { data, error } = await supabase
     .from('step_metrics')
-    .insert({ step_id, sent, opened, clicked, ctr, open_rate, source, user_id: user.id })
+    .insert({ step_id, sent: s, opened: o, clicked: c, ctr, open_rate, source, user_id: user.id })
     .select().single()
   if (error) throw error
   return data
 }
 
-export async function saveScreenshotSteps(funnelId, parsedSteps, parsedConnections) {
+export async function saveScreenshotSteps(funnelId, parsedSteps, parsedConnections, terminalOutcomes) {
   const { data: { user } } = await supabase.auth.getUser()
 
   const { data: existingSteps } = await supabase.from('steps').select('id').eq('funnel_id', funnelId)
@@ -110,15 +114,15 @@ export async function saveScreenshotSteps(funnelId, parsedSteps, parsedConnectio
 
     if (step) {
       stepIdMap[stepData.order] = step.id
-      if (stepData.sent || stepData.clicked) {
-        const sent = stepData.sent || null
-        const opened = stepData.opened || null
-        const clicked = stepData.clicked || null
+      const sent = stepData.sent ?? null
+      const opened = stepData.opened ?? null
+      const clicked = stepData.clicked ?? null
+      if (sent != null || clicked != null) {
         await supabase.from('step_metrics').insert({
           step_id: step.id, user_id: user.id,
           sent, opened, clicked,
-          ctr: sent && clicked ? clicked / sent : null,
-          open_rate: sent && opened ? opened / sent : null,
+          ctr: sent != null && clicked != null && sent > 0 ? clicked / sent : null,
+          open_rate: sent != null && opened != null && sent > 0 ? opened / sent : null,
           source: 'screenshot',
         })
       }
@@ -141,35 +145,36 @@ export async function saveScreenshotSteps(funnelId, parsedSteps, parsedConnectio
       }
     }
   }
+
+  // FIX 1: terminal outcomes power the weighted end to end CR
+  if (terminalOutcomes?.length) {
+    await supabase.from('funnels')
+      .update({ terminal_outcomes: terminalOutcomes })
+      .eq('id', funnelId)
+  }
 }
 
 // ── NORMALISE STEPS ───────────────────────────────────────────────────────────
-// For each consecutive step pair, check if the funnel was updated mid-run.
-// Condition: next.sent < 70% of (curr.sent × curr_ctr_rate)
-// where curr_ctr_rate is recalculated fresh from raw sent/clicked — NOT from
-// the stored ctr field, which may differ due to rounding at parse time.
+// FIX 2: iterate BACKWARD so a mid run update detected late in the funnel
+// cascades all the way up the chain. Forward iteration only corrected the one
+// step before the break and left every earlier step on the stale cohort.
 //
-// If triggered: effectiveSent = next.sent / curr_ctr_rate (precise division)
-// This matches: effectiveSent × curr_ctr_rate = next.sent exactly.
+// Detection: next step's effective sent is under 70% of this step's effective
+// clicked. Correction: effectiveSent = next.effectiveSent / this step's own
+// click rate, recomputed from raw counts for precision.
 export function normaliseSteps(msgSteps) {
   if (!msgSteps.length) return []
 
   const raw = msgSteps.map(s => {
     const m = s.step_metrics?.[0]
-    const sent = m?.sent || null
-    const opened = m?.opened || null
-    const clicked = m?.clicked || null
-    // Recalculate CTR from raw counts for precision — do not use stored ctr field
-    const ctrRate = sent && clicked ? clicked / sent : (m?.ctr || null)
-    const openRate = sent && opened ? opened / sent : (m?.open_rate || null)
-
+    const sent = m?.sent ?? null
+    const opened = m?.opened ?? null
+    const clicked = m?.clicked ?? null
+    const ctrRate = sent != null && clicked != null && sent > 0 ? clicked / sent : (m?.ctr ?? null)
+    const openRate = sent != null && opened != null && sent > 0 ? opened / sent : (m?.open_rate ?? null)
     return {
       step: s,
-      sent,
-      opened,
-      clicked,
-      ctrRate,   // precise rate from raw counts
-      openRate,
+      sent, opened, clicked, ctrRate, openRate,
       wasAdjusted: false,
       effectiveSent: sent,
       effectiveOpened: opened,
@@ -177,77 +182,53 @@ export function normaliseSteps(msgSteps) {
     }
   })
 
-  for (let i = 0; i < raw.length - 1; i++) {
+  for (let i = raw.length - 2; i >= 0; i--) {
     const curr = raw[i]
     const next = raw[i + 1]
 
-    // Need both curr's effective clicked and next's raw sent to compare
-    if (!curr.effectiveClicked || !next.sent || !curr.ctrRate) continue
+    if (curr.effectiveClicked == null || curr.effectiveClicked === 0) continue
+    if (next.effectiveSent == null || !curr.ctrRate) continue
 
-    // Expected next sent = curr effective clicked (people who clicked curr get next)
-    const expectedNextSent = curr.effectiveClicked
-    const ratio = next.sent / expectedNextSent
+    const ratio = next.effectiveSent / curr.effectiveClicked
+    if (ratio >= 0.7) continue
 
-    // Only adjust if next.sent is significantly less than expected (< 70%)
-    // This means the funnel was updated between these two steps
-    if (ratio < 0.7) {
-      // Precise calculation: effectiveSent = next.sent / ctrRate
-      // This ensures: effectiveSent × ctrRate = next.sent exactly
-      const newEffectiveSent = Math.round(next.sent / curr.ctrRate)
-      const newEffectiveClicked = next.sent
-      const newEffectiveOpened = curr.openRate
-        ? Math.round(newEffectiveSent * curr.openRate)
-        : null
-
-      raw[i] = {
-        ...curr,
-        effectiveSent: newEffectiveSent,
-        effectiveOpened: newEffectiveOpened,
-        effectiveClicked: newEffectiveClicked,
-        wasAdjusted: true,
-      }
+    const newEffectiveSent = Math.round(next.effectiveSent / curr.ctrRate)
+    raw[i] = {
+      ...curr,
+      effectiveSent: newEffectiveSent,
+      effectiveOpened: curr.openRate != null ? Math.round(newEffectiveSent * curr.openRate) : null,
+      effectiveClicked: next.effectiveSent,
+      wasAdjusted: true,
     }
-    // If ratio >= 0.7, no adjustment — next.sent is within expected range
   }
 
   return raw
 }
 
-function computeWeightedCr(msgSteps, goalStep, connections, effectiveSent) {
-  if (!effectiveSent) return null
+// ── WEIGHTED END TO END CR ────────────────────────────────────────────────────
+// FIX 1: previously this summed branch.end_clicks, a field the parser never
+// produced, so it silently fell back to majority every time. It now reads
+// terminal_outcomes (every leaf endpoint of the flow with its clicked count),
+// which cannot double count the way summing nested splits would.
+function computeWeightedCr(funnel, msgSteps, goalStep, effectiveSent) {
+  if (!effectiveSent) return { cr: null, weighted: false }
 
-  const hasBranchData = connections?.some(c => c.branch_metadata)
-
-  if (!hasBranchData) {
-    const gm = goalStep?.step_metrics?.[0]
-    if (gm?.clicked) return gm.clicked / effectiveSent
-    const lastMsg = [...msgSteps].reverse().find(s => s.step_metrics?.[0]?.clicked)
-    const lastClicks = lastMsg?.step_metrics?.[0]?.clicked
-    return lastClicks ? lastClicks / effectiveSent : null
+  let outcomes = funnel.terminal_outcomes
+  if (typeof outcomes === 'string') {
+    try { outcomes = JSON.parse(outcomes) } catch { outcomes = null }
   }
 
-  let totalWeightedClicks = 0
-  connections.forEach(conn => {
-    if (!conn.branch_metadata) return
-    try {
-      const meta = typeof conn.branch_metadata === 'string'
-        ? JSON.parse(conn.branch_metadata)
-        : conn.branch_metadata
-      if (meta.branches) {
-        meta.branches.forEach(branch => {
-          if (branch.sent && branch.end_clicks) {
-            totalWeightedClicks += branch.end_clicks
-          }
-        })
-      }
-    } catch {}
-  })
+  if (Array.isArray(outcomes) && outcomes.length) {
+    const total = outcomes.reduce((s, o) => s + (Number(o?.clicked) || 0), 0)
+    if (total > 0) return { cr: total / effectiveSent, weighted: outcomes.length > 1 }
+  }
 
-  if (totalWeightedClicks > 0) return totalWeightedClicks / effectiveSent
-
+  // Majority fallback
+  const gm = goalStep?.step_metrics?.[0]
+  if (gm?.clicked) return { cr: gm.clicked / effectiveSent, weighted: false }
   const lastMsg = [...msgSteps].reverse().find(s => s.step_metrics?.[0]?.clicked)
   const lastClicks = lastMsg?.step_metrics?.[0]?.clicked
-  return lastClicks ? lastClicks / effectiveSent : null
+  return { cr: lastClicks ? lastClicks / effectiveSent : null, weighted: false }
 }
 
 export function computeOverview(funnels) {
@@ -261,7 +242,8 @@ export function computeOverview(funnels) {
     const m1raw = msgSteps[0]?.step_metrics?.[0]
 
     const normalised = normaliseSteps(msgSteps)
-    const effectiveSent = normalised[0]?.effectiveSent || null
+    const effectiveSent = normalised[0]?.effectiveSent ?? null
+    const m1Clicks = normalised[0]?.effectiveClicked ?? null
     const wasUpdated = normalised.some(n => n.wasAdjusted)
     const branchCount = connections.filter(c => c.branch_metadata).length
 
@@ -273,15 +255,16 @@ export function computeOverview(funnels) {
         ? +(n.effectiveOpened / n.effectiveSent * 100).toFixed(1)
         : (n.openRate != null ? +(n.openRate * 100).toFixed(1) : null)
 
-      // Cumulative CTR: for adjusted M1, use ctrRate directly (it's precise)
-      // For all others, use effectiveClicked / effectiveSent
-      if (i === 0 && n.wasAdjusted && n.ctrRate != null) {
-        stepMetrics[`${key}_ctr_pct`] = +(n.ctrRate * 100).toFixed(1)
-      } else if (n.effectiveClicked != null && effectiveSent) {
-        stepMetrics[`${key}_ctr_pct`] = +(n.effectiveClicked / effectiveSent * 100).toFixed(1)
-      } else {
-        stepMetrics[`${key}_ctr_pct`] = null
-      }
+      // Cumulative: share of the original cohort still converting at this step
+      stepMetrics[`${key}_ctr_pct`] = n.effectiveClicked != null && effectiveSent
+        ? +(n.effectiveClicked / effectiveSent * 100).toFixed(1)
+        : null
+
+      // FIX 5: per step rate, so drop off analysis measures message strength
+      // rather than the arithmetic decline baked into cumulative values
+      stepMetrics[`${key}_step_ctr_pct`] = n.effectiveClicked != null && n.effectiveSent
+        ? +(n.effectiveClicked / n.effectiveSent * 100).toFixed(1)
+        : null
 
       stepMetrics[`${key}_sent`] = n.effectiveSent
       stepMetrics[`${key}_message`] = n.step.message_text || null
@@ -289,17 +272,26 @@ export function computeOverview(funnels) {
       stepMetrics[`${key}_was_adjusted`] = n.wasAdjusted
     })
 
-    const weightedCr = computeWeightedCr(msgSteps, goalStep, connections, effectiveSent)
+    const { cr: weightedCr, weighted } = computeWeightedCr(f, msgSteps, goalStep, effectiveSent)
+
+    // FIX 4: downstream CR shares no denominator with M1 CTR, so correlating
+    // the two is not spurious the way M1 CTR against funnel CR was
+    const terminalClicks = weightedCr != null && effectiveSent ? weightedCr * effectiveSent : null
+    const downstreamCrPct = terminalClicks != null && m1Clicks
+      ? +(terminalClicks / m1Clicks * 100).toFixed(1)
+      : null
 
     return {
       id: f.id,
       name: f.name,
       version: f.version,
       keywords: f.keywords?.map(k => k.keyword) || [],
-      total_sent: m1raw?.sent || null,
+      total_sent: m1raw?.sent ?? null,
       effective_sent: effectiveSent,
       was_updated: wasUpdated,
       funnel_cr_pct: weightedCr != null ? +(weightedCr * 100).toFixed(1) : null,
+      cr_is_weighted: weighted,
+      downstream_cr_pct: downstreamCrPct,
       step_count: msgSteps.length,
       max_step: msgSteps.length,
       branch_count: branchCount,
@@ -309,10 +301,20 @@ export function computeOverview(funnels) {
 
   const maxSteps = Math.max(...rows.map(r => r.max_step || 1), 1)
 
-  const avg = (key, versionFilter) => {
+  // FIX 3: volume weight by effective sent. An unweighted mean let a 4 send
+  // node move the average as much as a 3,391 send node.
+  const avg = (key, versionFilter, { weighted = true } = {}) => {
     const filtered = versionFilter ? rows.filter(r => r.version === versionFilter) : rows
-    const vals = filtered.map(r => r[key]).filter(v => v != null)
-    return vals.length ? +(vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1) : null
+    const usable = filtered.filter(r => r[key] != null)
+    if (!usable.length) return null
+    if (!weighted) {
+      return +(usable.reduce((s, r) => s + r[key], 0) / usable.length).toFixed(1)
+    }
+    const totalW = usable.reduce((s, r) => s + (r.effective_sent || 0), 0)
+    if (!totalW) {
+      return +(usable.reduce((s, r) => s + r[key], 0) / usable.length).toFixed(1)
+    }
+    return +(usable.reduce((s, r) => s + r[key] * (r.effective_sent || 0), 0) / totalW).toFixed(1)
   }
 
   const buildAverages = (versionFilter) => {
@@ -320,10 +322,12 @@ export function computeOverview(funnels) {
     for (let i = 1; i <= maxSteps; i++) {
       avgs[`m${i}_open_rate_pct`] = avg(`m${i}_open_rate_pct`, versionFilter)
       avgs[`m${i}_ctr_pct`] = avg(`m${i}_ctr_pct`, versionFilter)
+      avgs[`m${i}_step_ctr_pct`] = avg(`m${i}_step_ctr_pct`, versionFilter)
     }
     avgs.funnel_cr_pct = avg('funnel_cr_pct', versionFilter)
-    avgs.total_sent = avg('total_sent', versionFilter)
-    avgs.effective_sent = avg('effective_sent', versionFilter)
+    avgs.total_sent = avg('total_sent', versionFilter, { weighted: false })
+    avgs.effective_sent = avg('effective_sent', versionFilter, { weighted: false })
+    avgs.is_volume_weighted = true
     return avgs
   }
 
