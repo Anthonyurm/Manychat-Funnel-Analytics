@@ -21,7 +21,13 @@ HOW TO FOLLOW THE PATH
 
 6. The 20 percent test applies only between siblings, meaning two or more nodes fed by the same split or condition. Among siblings, keep the one you are following and ignore the rest. Never apply this test along the sequence.
 
-7. At a split where one message offers several CTA buttons, compare the CTR percentages printed beside each button and follow only the numerically highest one. Read the actual number rather than inferring from the label or position, so "CTR 54%" beats "CTR 18%". Record every button label with its exact CTR in branch_metadata.
+7. Flows split in two different ways and both must be handled.
+
+   Button splits: one message offers several CTA buttons. Compare the CTR percentages printed beside each button and follow only the numerically highest one. Read the actual number rather than inferring from the label or position, so "CTR 54%" beats "CTR 18%". Record every button label with its exact CTR in branch_metadata.
+
+   Condition splits: a Condition node has two outgoing connectors, usually one for the contacts that match and one for those that do not, and neither carries a CTR. Look at the first Send Message node on each side and follow only the side whose node has the higher Sent count. Never include Send Message nodes from both sides of a Condition. Two nodes fed by the same Condition are siblings, and putting them in the same sequence corrupts the whole analysis.
+
+7b. Self check before you answer. Walk your own step list from first to last and confirm every step's Sent is smaller than the previous step's Clicked. People can only reach a step by clicking the one before it, so a step sent to more people than clicked the step above it proves you crossed into a parallel branch. If you find one, drop that step and everything after it that came from the same wrong branch, then continue down the correct branch instead.
 
 8. Number the steps M1, M2, M3 and so on along the path you followed, left to right and top to bottom across all images.
 

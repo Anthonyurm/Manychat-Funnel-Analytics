@@ -183,6 +183,23 @@ export default function Overview() {
         <StatCard label="Total Volume" value={totalVol.toLocaleString()} unit="" delta="effective cohort across funnels" />
       </div>
 
+      {filtered.some(f => f.chain_valid === false) && (
+        <div style={{ background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.30)', borderRadius: 12, padding: '16px 20px', marginBottom: 24 }}>
+          <div style={{ fontFamily: 'var(--display)', fontWeight: 600, color: 'var(--gold)', marginBottom: 8, fontSize: 14 }}>
+            Check these funnels before using their numbers
+          </div>
+          {filtered.filter(f => f.chain_valid === false).map(f => (
+            <div key={f.id} style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.7, padding: '6px 0' }}>
+              <strong>{f.name}</strong>
+              {(f.chain_issues || []).map((iss, i) => <div key={i} style={{ color: 'var(--muted)', fontSize: 12 }}>{iss.detail}</div>)}
+            </div>
+          ))}
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8, lineHeight: 1.6 }}>
+            Raw figures are shown for these rather than corrected ones. Open the funnel, delete any step that belongs to a parallel branch, then the correction will run.
+          </div>
+        </div>
+      )}
+
       <PatternSummary funnels={filtered} versionFilter={versionFilter} />
 
       {best && bestM1 && (
@@ -290,7 +307,10 @@ export default function Overview() {
                 <td>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                     <Bar val={f.funnel_cr_pct} low={15} high={40} />
-                    {f.funnel_cr_pct != null && !f.cr_is_weighted && (
+                    {f.chain_valid === false && (
+                      <span title="Step sequence mixes parallel branches. Raw figures shown." style={{ fontFamily: 'var(--sans)', fontSize: 9, fontWeight: 600, color: 'var(--gold)', cursor: 'help' }}>check</span>
+                    )}
+                    {f.funnel_cr_pct != null && f.chain_valid !== false && !f.cr_is_weighted && (
                       <span title="Majority path only. Re upload the screenshots to capture every branch." style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--gold)', cursor: 'help' }}>maj</span>
                     )}
                   </div>

@@ -162,6 +162,35 @@ export async function saveScreenshotSteps(funnelId, parsedSteps, parsedConnectio
 // Detection: next step's effective sent is under 70% of this step's effective
 // clicked. Correction: effectiveSent = next.effectiveSent / this step's own
 // click rate, recomputed from raw counts for precision.
+// Before touching anything, confirm the step list is actually a single path.
+// Each step's audience must be a subset of the people who clicked the step
+// before it. If a step was sent to materially more people than could possibly
+// have arrived from its parent, the parser has crossed into a parallel branch
+// and the list is a mixture of siblings rather than a sequence.
+export function validateChain(rows) {
+  const issues = []
+  for (let i = 0; i < rows.length - 1; i++) {
+    const curr = rows[i], next = rows[i + 1]
+    if (curr.clicked == null || next.sent == null) continue
+    if (curr.clicked === 0) continue
+    // 1.5x tolerance absorbs rounding and small reporting lag
+    if (next.sent > curr.clicked * 1.5) {
+      issues.push({
+        at: i + 2,
+        detail: `M${i + 2} was sent to ${next.sent} people but only ${curr.clicked} clicked M${i + 1}. These are parallel branches, not consecutive steps.`
+      })
+    }
+  }
+  return { valid: issues.length === 0, issues }
+}
+
+// FIX 2: iterate BACKWARD so a mid run update detected late in the funnel
+// cascades all the way up the chain. Forward iteration only corrected the one
+// step before the break and left every earlier step on the stale cohort.
+//
+// Guarded: the cascade only runs on a validated path. On a mixed branch list
+// it would shrink a real cohort to nothing, so raw figures are kept instead
+// and the funnel is flagged for review.
 export function normaliseSteps(msgSteps) {
   if (!msgSteps.length) return []
 
@@ -176,11 +205,18 @@ export function normaliseSteps(msgSteps) {
       step: s,
       sent, opened, clicked, ctrRate, openRate,
       wasAdjusted: false,
+      chainValid: true,
+      chainIssues: [],
       effectiveSent: sent,
       effectiveOpened: opened,
       effectiveClicked: clicked,
     }
   })
+
+  const { valid, issues } = validateChain(raw)
+  if (!valid) {
+    return raw.map(r => ({ ...r, chainValid: false, chainIssues: issues }))
+  }
 
   for (let i = raw.length - 2; i >= 0; i--) {
     const curr = raw[i]
@@ -202,14 +238,22 @@ export function normaliseSteps(msgSteps) {
     }
   }
 
+  // A correction that erases more than 95% of the entry cohort is far more
+  // likely to be a misread flow than a genuine mid run edit. Keep the numbers
+  // but mark them so nobody builds a decision on them unchecked.
+  const rawEntry = raw[0]?.sent
+  const effEntry = raw[0]?.effectiveSent
+  if (rawEntry && effEntry && effEntry < rawEntry * 0.05) {
+    const note = {
+      at: 1,
+      detail: `The entry step fell from ${rawEntry} to ${effEntry}, a drop of over 95%. Verify the parsed steps against the screenshot before trusting these figures.`
+    }
+    return raw.map(r => ({ ...r, chainValid: false, chainIssues: [note] }))
+  }
+
   return raw
 }
 
-// ── WEIGHTED END TO END CR ────────────────────────────────────────────────────
-// FIX 1: previously this summed branch.end_clicks, a field the parser never
-// produced, so it silently fell back to majority every time. It now reads
-// terminal_outcomes (every leaf endpoint of the flow with its clicked count),
-// which cannot double count the way summing nested splits would.
 function computeWeightedCr(funnel, msgSteps, goalStep, effectiveSent) {
   if (!effectiveSent) return { cr: null, weighted: false }
 
@@ -245,6 +289,8 @@ export function computeOverview(funnels) {
     const effectiveSent = normalised[0]?.effectiveSent ?? null
     const m1Clicks = normalised[0]?.effectiveClicked ?? null
     const wasUpdated = normalised.some(n => n.wasAdjusted)
+    const chainValid = normalised[0]?.chainValid !== false
+    const chainIssues = normalised[0]?.chainIssues || []
     const branchCount = connections.filter(c => c.branch_metadata).length
 
     const stepMetrics = {}
@@ -255,9 +301,11 @@ export function computeOverview(funnels) {
         ? +(n.effectiveOpened / n.effectiveSent * 100).toFixed(1)
         : (n.openRate != null ? +(n.openRate * 100).toFixed(1) : null)
 
-      // Cumulative: share of the original cohort still converting at this step
+      // Cumulative: share of the original cohort still converting at this step.
+      // Clamped at 100 because a step cannot convert more people than entered.
+      // Exceeding it is proof the sequence is not a single path.
       stepMetrics[`${key}_ctr_pct`] = n.effectiveClicked != null && effectiveSent
-        ? +(n.effectiveClicked / effectiveSent * 100).toFixed(1)
+        ? +(Math.min(100, n.effectiveClicked / effectiveSent * 100)).toFixed(1)
         : null
 
       // FIX 5: per step rate, so drop off analysis measures message strength
@@ -289,7 +337,9 @@ export function computeOverview(funnels) {
       total_sent: m1raw?.sent ?? null,
       effective_sent: effectiveSent,
       was_updated: wasUpdated,
-      funnel_cr_pct: weightedCr != null ? +(weightedCr * 100).toFixed(1) : null,
+      chain_valid: chainValid,
+      chain_issues: chainIssues,
+      funnel_cr_pct: weightedCr != null ? +(Math.min(100, weightedCr * 100)).toFixed(1) : null,
       cr_is_weighted: weighted,
       downstream_cr_pct: downstreamCrPct,
       step_count: msgSteps.length,
