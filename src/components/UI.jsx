@@ -1,7 +1,7 @@
 import { useState } from 'react'
 
-export const pct = (v, d = 1) => v == null ? '—' : Number(v).toFixed(d) + '%'
-export const num = v => v == null ? '—' : Number(v).toLocaleString()
+export const pct = (v, d = 1) => v == null ? 'n/a' : Number(v).toFixed(d) + '%'
+export const num = v => v == null ? 'n/a' : Number(v).toLocaleString()
 export const VERSIONS = ['Song Out Now', 'Pre-Release / Early Access', 'New Follower Automation', 'Sales Funnel']
 
 export function colorFor(val, low = 20, high = 50) {
@@ -30,6 +30,13 @@ export function Bar({ val, max = 100, low = 20, high = 50 }) {
   )
 }
 
+// Stored version strings stay untouched so existing rows keep matching.
+// Only the on screen label is cleaned up to respect the no dash rule.
+export function versionLabel(version) {
+  if (!version) return 'Unclassified'
+  return version.replace(/-/g, ' ')
+}
+
 export function Badge({ version }) {
   const cls = {
     'Song Out Now': 'badge-outnow',
@@ -37,7 +44,7 @@ export function Badge({ version }) {
     'New Follower Automation': 'badge-newfollow',
     'Sales Funnel': 'badge-other',
   }
-  return <span className={'badge ' + (cls[version] || 'badge-unknown')}>{version || 'Unknown'}</span>
+  return <span className={'badge ' + (cls[version] || 'badge-unknown')}>{versionLabel(version)}</span>
 }
 
 export function Spinner() {

@@ -22,10 +22,10 @@ export default function Layout({ session }) {
 
         <div className="nav-section">Analytics</div>
         <NavLink to="/" end className={({ isActive }) => 'nav-link' + (isActive ? ' active' : '')}>
-          <span className="nav-icon">⚡</span> Overview
+          <span className="nav-icon">▤</span> Overview
         </NavLink>
         <NavLink to="/intel" className={({ isActive }) => 'nav-link' + (isActive ? ' active' : '')}>
-          <span className="nav-icon">🧠</span> Message Intel
+          <span className="nav-icon">◈</span> Message Intel
         </NavLink>
 
         <div className="nav-section">Funnels</div>
@@ -39,7 +39,7 @@ export default function Layout({ session }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
             <div style={{
               width: 30, height: 30, borderRadius: 8,
-              background: 'rgba(124,92,252,0.2)', color: '#b0a0ff',
+              background: 'rgba(30,91,255,0.2)', color: '#8FB0FF',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700, flexShrink: 0
             }}>{initials}</div>

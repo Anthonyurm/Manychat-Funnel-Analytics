@@ -29,17 +29,17 @@ function PatternSummary({ funnels, versionFilter }) {
   const insights = []
 
   if (parseFloat(gap) > 5) {
-    insights.push(`Your top converters (${topNames}) average ${avgTop.toFixed(1)}% CR vs ${avgBot.toFixed(1)}% for your lowest (${botNames}) — a ${gap}pp gap ${scope}. This spread is large enough to act on.`)
+    insights.push(`Your top converters (${topNames}) average ${avgTop.toFixed(1)}% CR vs ${avgBot.toFixed(1)}% for your lowest (${botNames}). a ${gap}pp gap ${scope}. This spread is large enough to act on.`)
   } else {
     insights.push(`Your top and bottom converters are within ${gap}pp of each other ${scope}. Performance is relatively consistent, which means small optimizations at each step will compound.`)
   }
 
   if (m1Gap && parseFloat(m1Gap) > 10) {
-    insights.push(`M1 click-through rate differs by ${m1Gap}pp between your top and bottom funnels. Your first message is the biggest lever — rewriting your lowest M1 messages to match the style and structure of your top converters is the highest-priority test right now.`)
+    insights.push(`M1 click-through rate differs by ${m1Gap}pp between your top and bottom funnels. Your first message is the biggest lever. rewriting your lowest M1 messages to match the style and structure of your top converters is the highest-priority test right now.`)
   } else if (m1Gap && parseFloat(m1Gap) > 3) {
-    insights.push(`M1 CTR differs by ${m1Gap}pp between your top and bottom performers. There is a meaningful gap — review the message copy in Message Intelligence to identify which specific words and structures are driving the difference.`)
+    insights.push(`M1 CTR differs by ${m1Gap}pp between your top and bottom performers. There is a meaningful gap. review the message copy in Message Intelligence to identify which specific words and structures are driving the difference.`)
   } else if (m1Gap) {
-    insights.push(`M1 CTR is similar across top and bottom performers (${m1Gap}pp gap). The drop-off is happening later in the funnel — look at M2 and beyond for the biggest optimization opportunity.`)
+    insights.push(`M1 CTR is similar across top and bottom performers (${m1Gap}pp gap). The drop off is happening later in the funnel. look at M2 and beyond for the biggest optimization opportunity.`)
   }
 
   const QUOTED = /["\u201C\u201D'].+["\u201C\u201D']/
@@ -60,7 +60,7 @@ function PatternSummary({ funnels, versionFilter }) {
   return (
     <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 14, padding: 24, marginBottom: 24 }}>
       <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: 1.5, textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 16 }}>
-        Pattern Analysis {versionFilter !== 'all' ? `— ${versionFilter}` : '— All Types'}
+        Pattern Analysis {versionFilter !== 'all' ? `: ${versionFilter}` : ': All Types'}
       </div>
       {insights.map((text, i) => (
         <div key={i} style={{ fontSize: 13, lineHeight: 1.8, color: 'var(--text)', padding: '10px 0', borderBottom: i < insights.length - 1 ? '1px solid var(--border)' : 'none', display: 'flex', gap: 12 }}>
@@ -161,7 +161,7 @@ export default function Overview() {
       <div className="page-header">
         <div>
           <div className="page-title">Overview</div>
-          <div className="page-subtitle">Cross-funnel performance — hover columns for definitions, click to sort</div>
+          <div className="page-subtitle">Cross funnel performance. Click any column to sort.</div>
         </div>
         <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
           <div className="version-filter">
@@ -176,10 +176,10 @@ export default function Overview() {
       </div>
 
       <div className="stat-grid">
-        <StatCard label="Avg M1 Open Rate" value={averages.m1_open_rate_pct ?? '—'} unit="%" delta="volume weighted" />
-        <StatCard label="Avg M1 CTR" value={averages.m1_ctr_pct ?? '—'} unit="%" delta="volume weighted" />
-        <StatCard label="Avg M2 CTR" value={averages.m2_ctr_pct ?? '—'} unit="%" delta="volume weighted" />
-        <StatCard label="Avg Funnel CR" value={averages.funnel_cr_pct ?? '—'} unit="%" delta="weighted across branches" />
+        <StatCard label="Avg M1 Open Rate" value={averages.m1_open_rate_pct ?? 'n/a'} unit="%" delta="volume weighted" />
+        <StatCard label="Avg M1 CTR" value={averages.m1_ctr_pct ?? 'n/a'} unit="%" delta="volume weighted" />
+        <StatCard label="Avg M2 CTR" value={averages.m2_ctr_pct ?? 'n/a'} unit="%" delta="volume weighted" />
+        <StatCard label="Avg Funnel CR" value={averages.funnel_cr_pct ?? 'n/a'} unit="%" delta="weighted across branches" />
         <StatCard label="Total Volume" value={totalVol.toLocaleString()} unit="" delta="effective cohort across funnels" />
       </div>
 
@@ -187,10 +187,10 @@ export default function Overview() {
 
       {best && bestM1 && (
         <div className="insight">
-          <strong>{best.name}</strong> is your top-converting funnel at <strong>{best.funnel_cr_pct}% CR</strong>.{' '}
+          <strong>{best.name}</strong> is your top converting funnel at <strong>{best.funnel_cr_pct}% CR</strong>.{' '}
           <strong>{bestM1.name}</strong> leads M1 CTR at <strong>{bestM1.m1_ctr_pct}%</strong>
           {bestM1.m1_ctr_pct > (averages.m1_ctr_pct || 0)
-            ? ` — ${(bestM1.m1_ctr_pct - averages.m1_ctr_pct).toFixed(1)}pp above average.`
+            ? `. ${(bestM1.m1_ctr_pct - averages.m1_ctr_pct).toFixed(1)}pp above average.`
             : '.'}
           {' '}<span style={{ color: 'var(--muted)' }}>Go to Message Intelligence for a detailed wording breakdown.</span>
         </div>
@@ -198,13 +198,13 @@ export default function Overview() {
 
       <div className="table-wrap">
         <div className="table-header">
-          <div className="table-title">{versionFilter === 'all' ? 'All Funnels' : versionFilter} — {filtered.length} total</div>
+          <div className="table-title">{versionFilter === 'all' ? 'All Funnels' : versionFilter}. {filtered.length} total</div>
           <button className="btn btn-ghost btn-sm" onClick={load}>Refresh</button>
         </div>
         <table>
           <thead>
             <tr>
-              {/* Actions — far left */}
+              {/* Actions. far left */}
               <th style={{ width: 56 }}></th>
               <th style={{ width: 32 }}></th>
               <th className={'sortable' + (sort.key === 'name' ? ' sorted' : '')} onClick={() => toggleSort('name')}>Funnel {arrow('name')}</th>
@@ -237,7 +237,7 @@ export default function Overview() {
 
             {sorted.map((f, i) => (
               <tr key={f.id} onClick={() => editingId !== f.id && navigate(`/funnels/${f.id}`)}>
-                {/* Actions — far left, icon-only */}
+                {/* Actions. far left, icon-only */}
                 <td onClick={e => e.stopPropagation()} style={{ width: 56 }}>
                   <div style={{ display: 'flex', gap: 4 }}>
                     <button
@@ -291,14 +291,14 @@ export default function Overview() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                     <Bar val={f.funnel_cr_pct} low={15} high={40} />
                     {f.funnel_cr_pct != null && !f.cr_is_weighted && (
-                      <span title="Majority path only. Re-upload the screenshots to capture every branch." style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--gold)', cursor: 'help' }}>maj</span>
+                      <span title="Majority path only. Re upload the screenshots to capture every branch." style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--gold)', cursor: 'help' }}>maj</span>
                     )}
                   </div>
                 </td>
                 <td className="mono-cell" style={{ color: 'var(--muted)' }}>
                   {num(f.effective_sent)}
                   {f.was_updated && f.effective_sent !== f.total_sent && (
-                    <span title={`Raw: ${num(f.total_sent)} — funnel was updated mid-run, showing effective cohort`} style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--gold)', marginLeft: 4, cursor: 'help' }}>~</span>
+                    <span title={`Raw: ${num(f.total_sent)}. funnel was updated mid run, showing effective cohort`} style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--gold)', marginLeft: 4, cursor: 'help' }}>~</span>
                   )}
                 </td>
               </tr>

@@ -69,7 +69,7 @@ export default function Login() {
         </div>
 
         <div style={{ textAlign: 'center', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', marginTop: 20 }}>
-          Your data is private — only you can see your funnels.
+          Your data is private. only you can see your funnels.
         </div>
       </div>
     </div>

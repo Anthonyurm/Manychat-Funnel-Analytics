@@ -5,17 +5,17 @@ import { VERSIONS } from '../components/UI'
 
 const VISION_PROMPT = `You are analyzing ManyChat flow builder screenshots for a music artist's Instagram DM automation. Treat all images as one continuous flow reading left to right.
 
-EXTRACTION RULES — follow every rule exactly:
+EXTRACTION RULES. follow every rule exactly:
 
 1. ONLY extract Instagram Send Message nodes. SKIP everything else without exception: Condition nodes, Action nodes, Smart Delay nodes, When/trigger nodes, External Request nodes, Waiting nodes.
 
 2. A single Send Message node can contain multiple message bubbles stacked vertically. Do NOT split these into separate steps. One node header ("Instagram / Send Message #X") = one step. Combine all message text from the same node into one message_text field.
 
-3. SKIP any Send Message node where Clicked is 0% and there is no actionable CTA button — these are automated delivery nodes (e.g. "song unlocked", "here's your link"). The next Send Message node after it becomes the next numbered step.
+3. SKIP any Send Message node where Clicked is 0% and there is no actionable CTA button. these are automated delivery nodes (e.g. "song unlocked", "here's your link"). The next Send Message node after it becomes the next numbered step.
 
 4. SKIP any Send Message node where Sent is less than 20% of the previous included Send Message node's Sent count. These are minority path branches.
 
-5. At every split point where a message has multiple CTA buttons, you MUST compare the actual CTR percentage numbers shown next to each button. Follow ONLY the path triggered by the button with the NUMERICALLY HIGHEST CTR percentage. This is critical — do not guess based on button label or position. Read the actual number shown (e.g. "CTR 54%" beats "CTR 18%"). Record ALL button labels and their exact CTR percentages in branch_metadata.
+5. At every split point where a message has multiple CTA buttons, you MUST compare the actual CTR percentage numbers shown next to each button. Follow ONLY the path triggered by the button with the NUMERICALLY HIGHEST CTR percentage. This is critical. do not guess based on button label or position. Read the actual number shown (e.g. "CTR 54%" beats "CTR 18%"). Record ALL button labels and their exact CTR percentages in branch_metadata.
 
 6. Label messages M1, M2, M3 etc in order following the majority path only, left to right and top to bottom across all images.
 
@@ -145,7 +145,7 @@ export default function NewFunnel() {
         return
       }
 
-      setProgress(`Found ${result.steps.length} steps — saving funnel…`)
+      setProgress(`Found ${result.steps.length} steps. saving funnel…`)
       const funnel = await createFunnel({ name: funnelName, version: funnelVersion })
       await saveScreenshotSteps(funnel.id, result.steps, result.connections, result.terminal_outcomes)
       navigate(`/funnels/${funnel.id}`)
@@ -162,7 +162,7 @@ export default function NewFunnel() {
         <div>
           <div className="page-title">Add Funnel</div>
           <div className="page-subtitle">
-            Upload screenshots of your ManyChat flow — AI reads each step, message copy, CTA, and metrics automatically
+            Upload screenshots of your ManyChat flow. Every step, message, CTA, and metric is read automatically.
           </div>
         </div>
       </div>
@@ -200,7 +200,7 @@ export default function NewFunnel() {
                   e.currentTarget.classList.remove('over')
                   setFiles(Array.from(e.dataTransfer.files))
                 }}>
-                <div style={{ fontSize: 36, marginBottom: 10 }}>{files.length > 0 ? '✓' : '🖼️'}</div>
+                <div style={{ fontSize: 36, marginBottom: 10 }}>{files.length > 0 ? '✓' : '▣'}</div>
                 <div className="upload-title">
                   {files.length > 0
                     ? `${files.length} image${files.length > 1 ? 's' : ''} selected`
@@ -246,8 +246,8 @@ export default function NewFunnel() {
               {[
                 'Set your ManyChat flow builder zoom to 100% or higher so all text is sharp and fully readable.',
                 'Make sure every node shows its Sent, Opened, Clicked numbers and any button labels before screenshotting.',
-                'Do not crop out any nodes — if your flow is wider than one screen, take multiple overlapping screenshots and upload them all at once.',
-                'Avoid screenshotting on a small monitor or with browser zoom set below 100% — low resolution makes text unreadable for the AI.',
+                'Do not crop out any nodes. if your flow is wider than one screen, take multiple overlapping screenshots and upload them all at once.',
+                'Avoid screenshotting on a small monitor or with browser zoom set below 100%. low resolution makes text unreadable for the AI.',
                 'If the AI misses a step or gets a number wrong, go into the funnel detail page and use the Edit raw metrics button to correct it.',
               ].map((tip, i) => (
                 <div key={i} style={{ display: 'flex', gap: 12, padding: '7px 0', borderBottom: i < 4 ? '1px solid var(--border)' : 'none', fontSize: 13, color: 'var(--text)', lineHeight: 1.6 }}>

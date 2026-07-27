@@ -1,25 +1,41 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+
+/* ─────────────────────────────────────────────────────────────
+   ELITE ARTIST SOCIETY — brand tokens
+   Cobalt for action. Violet for frameworks. Amber for risk.
+   Mint for proof. Neutrals carry everything else.
+   ───────────────────────────────────────────────────────────── */
 :root {
-  --bg: #0a0a0f;
-  --surface: #13131f;
-  --surface2: #1e1e2e;
-  --border: #2e2e45;
-  --accent: #7c5cfc;
-  --accent2: #fc5c7d;
-  --accent3: #3dffa0;
-  --text: #f0f0fa;
-  --muted: #8888aa;
-  --gold: #ffd166;
-  --mono: 'DM Mono', monospace;
-  --sans: 'Syne', sans-serif;
+  /* Neutral dark palette */
+  --bg: #050814;          /* background main */
+  --surface: #0B1120;     /* background elevated */
+  --surface2: #121A2E;    /* raised panel */
+  --border: #1C2740;
+  --text: #F9FAFB;        /* text main */
+  --muted: #9CA3AF;       /* text subtle */
+
+  /* Brand accents */
+  --accent: #1E5BFF;      /* Electric Cobalt — CTAs, links, key metrics */
+  --violet: #7C3AED;      /* Deep Violet — frameworks, education, diagrams */
+  --gold: #F59E0B;        /* Signal Amber — risk and urgency only */
+  --accent3: #22C55E;     /* Support Mint — wins and proof */
+  --accent2: #E5484D;     /* data state only, underperformance */
+
+  /* Type */
+  --display: 'Space Grotesk', 'Segoe UI', Arial, sans-serif;
+  --sans: 'Inter', 'Segoe UI', Arial, sans-serif;
+  --mono: 'Inter', 'Segoe UI', Arial, sans-serif;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { background: var(--bg); color: var(--text); font-family: var(--sans); min-height: 100vh; }
-body::before {
-  content: '';
-  position: fixed; inset: 0;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
-  pointer-events: none; z-index: 999; opacity: 0.4;
+body { background: var(--bg); color: var(--text); font-family: var(--sans); min-height: 100vh; -webkit-font-smoothing: antialiased; }
+
+/* Anything tagged --mono is a metric or label: tabular figures, tighter tracking */
+[style*="--mono"], .mono-cell, .stat-delta, .nav-section, .logo-sub, .page-subtitle,
+.bar-label, .node-label, .sort-arrow, .badge, .form-label, .table-title {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
 }
+
 a { color: inherit; text-decoration: none; }
 button { cursor: pointer; font-family: var(--sans); }
 input, select, textarea { font-family: var(--mono); }
@@ -47,7 +63,7 @@ input, select, textarea { font-family: var(--mono); }
   text-decoration: none;
 }
 .nav-link:hover { color: var(--text); background: var(--surface2); }
-.nav-link.active { color: var(--accent); background: rgba(124,92,252,0.1); border-right: 2px solid var(--accent); }
+.nav-link.active { color: var(--accent); background: rgba(30,91,255,0.1); border-right: 2px solid var(--accent); }
 .nav-icon { font-size: 15px; width: 18px; text-align: center; }
 
 /* ── PAGE HEADER ── */
@@ -82,8 +98,8 @@ thead th.sorted .sort-arrow { opacity: 1; }
 tbody tr { border-bottom: 1px solid var(--border); transition: background 0.1s; cursor: pointer; }
 tbody tr:last-child { border-bottom: none; }
 tbody tr:hover { background: var(--surface2); }
-tbody tr.avg-row { background: rgba(124,92,252,0.08); cursor: default; }
-tbody tr.avg-row td { color: #b0a0ff; font-weight: 600; }
+tbody tr.avg-row { background: rgba(30,91,255,0.08); cursor: default; }
+tbody tr.avg-row td { color: #8FB0FF; font-weight: 600; }
 td { padding: 12px 14px; font-size: 13px; vertical-align: middle; color: var(--text); }
 .name-cell { font-weight: 700; font-size: 14px; color: var(--text); }
 .mono-cell { font-family: var(--mono); font-size: 12px; color: var(--text); }
@@ -114,9 +130,9 @@ td { padding: 12px 14px; font-size: 13px; vertical-align: middle; color: var(--t
 
 /* ── BADGES ── */
 .badge { display: inline-block; padding: 3px 10px; border-radius: 4px; font-family: var(--mono); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
-.badge-outnow  { background: rgba(61,255,160,0.15); color: #3dffa0; border: 1px solid rgba(61,255,160,0.3); }
-.badge-presave { background: rgba(255,209,102,0.15); color: #ffd166; border: 1px solid rgba(255,209,102,0.3); }
-.badge-newfollow { background: rgba(124,92,252,0.15); color: #a88fff; border: 1px solid rgba(124,92,252,0.3); }
+.badge-outnow  { background: rgba(34,197,94,0.15); color: #22C55E; border: 1px solid rgba(34,197,94,0.3); }
+.badge-presave { background: rgba(245,158,11,0.15); color: #F59E0B; border: 1px solid rgba(245,158,11,0.3); }
+.badge-newfollow { background: rgba(30,91,255,0.15); color: #a88fff; border: 1px solid rgba(30,91,255,0.3); }
 .badge-other   { background: rgba(136,136,170,0.15); color: #aaaacc; border: 1px solid var(--border); }
 .badge-unknown { background: rgba(136,136,170,0.15); color: #aaaacc; border: 1px solid var(--border); }
 
@@ -126,8 +142,8 @@ td { padding: 12px 14px; font-size: 13px; vertical-align: middle; color: var(--t
 .btn-primary:hover { background: #6a4de8; }
 .btn-ghost { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
 .btn-ghost:hover { border-color: var(--accent); color: #c0b0ff; }
-.btn-danger { background: rgba(252,92,125,0.15); color: #ff8099; border: 1px solid rgba(252,92,125,0.35); }
-.btn-danger:hover { background: rgba(252,92,125,0.28); }
+.btn-danger { background: rgba(229,72,77,0.15); color: #E5484D; border: 1px solid rgba(229,72,77,0.35); }
+.btn-danger:hover { background: rgba(229,72,77,0.28); }
 .btn-sm { padding: 5px 12px; font-size: 11px; border-radius: 6px; }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
@@ -146,7 +162,7 @@ textarea.form-input { resize: vertical; min-height: 80px; }
 .form-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
 
 /* ── INSIGHT ── */
-.insight { background: rgba(124,92,252,0.08); border: 1px solid rgba(124,92,252,0.25); border-radius: 10px; padding: 14px 18px; font-size: 13px; line-height: 1.6; margin-bottom: 24px; color: var(--text); }
+.insight { background: rgba(30,91,255,0.08); border: 1px solid rgba(30,91,255,0.25); border-radius: 10px; padding: 14px 18px; font-size: 13px; line-height: 1.6; margin-bottom: 24px; color: var(--text); }
 .insight strong { color: #c0b0ff; }
 
 /* ── MISC ── */
@@ -158,10 +174,10 @@ textarea.form-input { resize: vertical; min-height: 80px; }
 .empty-state h3 { font-size: 18px; font-weight: 700; color: var(--text); margin-bottom: 8px; font-family: var(--sans); }
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 24px; margin-bottom: 20px; }
 .card-title { font-size: 14px; font-weight: 700; margin-bottom: 16px; color: var(--text); }
-.error-msg { color: #ff8099; font-family: var(--mono); font-size: 12px; margin-top: 8px; }
+.error-msg { color: #E5484D; font-family: var(--mono); font-size: 12px; margin-top: 8px; }
 .success-msg { color: var(--accent3); font-family: var(--mono); font-size: 12px; margin-top: 8px; }
 .upload-zone { border: 2px dashed var(--border); border-radius: 14px; padding: 40px; text-align: center; cursor: pointer; transition: all 0.2s; color: var(--text); }
-.upload-zone:hover, .upload-zone.over { border-color: var(--accent); background: rgba(124,92,252,0.06); }
+.upload-zone:hover, .upload-zone.over { border-color: var(--accent); background: rgba(30,91,255,0.06); }
 .upload-zone .upload-title { font-weight: 700; font-size: 16px; margin-bottom: 6px; color: var(--text); }
 .upload-zone .upload-sub { font-size: 12px; color: var(--muted); font-family: var(--mono); }
 
@@ -174,8 +190,8 @@ textarea.form-input { resize: vertical; min-height: 80px; }
   transition: border-color 0.15s; z-index: 2;
 }
 .node:hover { border-color: var(--accent); }
-.node.selected { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(124,92,252,0.2); }
-.node.condition-node { border-color: rgba(61,255,160,0.4); }
+.node.selected { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(30,91,255,0.2); }
+.node.condition-node { border-color: rgba(34,197,94,0.4); }
 .node-label { font-family: var(--mono); font-size: 10px; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 6px; }
 .node-title { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
 .node-msg { font-size: 11px; color: var(--muted); font-style: italic; line-height: 1.4; }
@@ -193,7 +209,7 @@ textarea.form-input { resize: vertical; min-height: 80px; }
 .funnel-flow { display: flex; align-items: flex-start; overflow-x: auto; padding-bottom: 12px; gap: 0; }
 .step-block { display: flex; flex-direction: column; align-items: center; }
 .step-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 12px; padding: 16px; width: 200px; flex-shrink: 0; }
-.step-card.goal { border-color: rgba(61,255,160,0.35); background: rgba(61,255,160,0.05); }
+.step-card.goal { border-color: rgba(34,197,94,0.35); background: rgba(34,197,94,0.05); }
 .step-arrow { display: flex; align-items: center; padding: 0 4px; margin-top: 30px; }
 .arrow-line { width: 28px; height: 2px; background: var(--border); position: relative; }
 .arrow-line::after { content: ''; position: absolute; right: -1px; top: -4px; border: 5px solid transparent; border-left: 7px solid var(--border); }
@@ -211,3 +227,85 @@ textarea.form-input { resize: vertical; min-height: 80px; }
 
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* ─────────────────────────────────────────────────────────────
+   TYPOGRAPHY — Space Grotesk carries headlines, Inter carries
+   everything read at length. Bold reserved for claims, numbers,
+   and CTAs, never whole paragraphs.
+   ───────────────────────────────────────────────────────────── */
+.page-title {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 32px;
+  letter-spacing: -0.02em;
+}
+.logo-mark {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 17px;
+  letter-spacing: 0.04em;
+  color: var(--text);
+}
+.card-title, .table-title {
+  font-family: var(--display);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.stat-value {
+  font-family: var(--display);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.stat-label {
+  font-weight: 500;
+  letter-spacing: 0.08em;
+}
+.step-card .node-title, .node-title { font-family: var(--display); font-weight: 600; }
+
+/* Cobalt owns action. Buttons and links get one colour, no gradients. */
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #FFFFFF;
+  font-weight: 600;
+}
+.btn-primary:hover { background: #1749CC; border-color: #1749CC; }
+.nav-link.active { color: var(--accent); background: rgba(30,91,255,0.10); border-right: 2px solid var(--accent); }
+
+/* Violet groups explanation and framework content */
+.insight {
+  border-left: 2px solid var(--violet);
+  background: rgba(124,58,237,0.07);
+}
+
+/* Mint frames proof, amber frames risk. Nothing decorative. */
+.bar-fill.good { background: var(--accent3); }
+.bar-fill.mid  { background: var(--gold); }
+.bar-fill.low  { background: var(--accent2); }
+
+/* Generous breathing room, per the layout rules */
+.card { padding: 24px; }
+.main { padding: 40px 44px; }
+.page-header { margin-bottom: 36px; padding-bottom: 26px; }
+
+/* Categorical badges: neutral chip, brand accent as the marker.
+   Amber is deliberately absent so it only ever signals risk. */
+.badge {
+  font-family: var(--sans);
+  font-weight: 600;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 4px 9px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.badge-outnow    { color: #7FA5FF; border-color: rgba(30,91,255,0.40);  background: rgba(30,91,255,0.10); }
+.badge-presave   { color: #B99BF5; border-color: rgba(124,58,237,0.40); background: rgba(124,58,237,0.10); }
+.badge-newfollow { color: #6EE7A0; border-color: rgba(34,197,94,0.40);  background: rgba(34,197,94,0.10); }
+.badge-other     { color: var(--muted); }
+.badge-unknown   { color: var(--muted); opacity: 0.8; }

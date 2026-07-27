@@ -14,7 +14,7 @@ const QUOTED = /["“”'].+["“”']/
 
 // FIX 6: signed delta so an improvement never renders as a double negative
 function ppLabel(v) {
-  if (v == null || Number.isNaN(v)) return '—'
+  if (v == null || Number.isNaN(v)) return 'n/a'
   const r = Number(v).toFixed(1)
   return (Number(v) > 0 ? '+' : '') + r + 'pp'
 }
@@ -95,7 +95,7 @@ export default function MessageIntel() {
     const funnelRows = filteredFunnels
       .filter(f => f.m1_message)
       .sort((a, b) => (b.m1_ctr_pct || 0) - (a.m1_ctr_pct || 0))
-      .map(f => `- Message: "${f.m1_message}" | CTA: "${f.m1_cta || 'N/A'}" -> M1 CTR ${f.m1_ctr_pct ?? 'N/A'}%, Open ${f.m1_open_rate_pct ?? 'N/A'}%, Funnel CR ${f.funnel_cr_pct ?? 'N/A'}%, Steps ${f.step_count}, Volume ${f.effective_sent ?? 'N/A'}`)
+      .map(f => `- Message: "${f.m1_message}" | CTA: "${f.m1_cta || 'N/A'}" → M1 CTR ${f.m1_ctr_pct ?? 'N/A'}%, Open ${f.m1_open_rate_pct ?? 'N/A'}%, Funnel CR ${f.funnel_cr_pct ?? 'N/A'}%, Steps ${f.step_count}, Volume ${f.effective_sent ?? 'N/A'}`)
       .join('\n')
 
     const prompt = `You are a conversion copywriting expert analyzing ManyChat DM funnel performance for a music artist. ${filter !== 'all' ? `These are all "${filter}" funnels.` : 'These funnels span all types.'}
@@ -321,14 +321,14 @@ Be specific. Quote actual copy. Reference actual numbers. No emojis. Max 400 wor
       </div>
 
       {withMsgs.length < 6 && (
-        <div style={{ background: 'rgba(255,209,102,0.07)', border: '1px solid rgba(255,209,102,0.25)', borderRadius: 10, padding: '12px 18px', marginBottom: 20, fontSize: 13, color: 'var(--text)', lineHeight: 1.6 }}>
-          <strong style={{ color: 'var(--gold)' }}>Small sample</strong> — {withMsgs.length} funnel{withMsgs.length === 1 ? '' : 's'} in this view. Patterns need at least {MIN_PATTERN_MATCHES} funnels on each side of a comparison before they are reported, so most sections stay quiet until you add more.
+        <div style={{ background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.25)', borderRadius: 10, padding: '12px 18px', marginBottom: 20, fontSize: 13, color: 'var(--text)', lineHeight: 1.6 }}>
+          <strong style={{ color: 'var(--gold)' }}>Small sample</strong>. {withMsgs.length} funnel{withMsgs.length === 1 ? '' : 's'} in this view. Patterns need at least {MIN_PATTERN_MATCHES} funnels on each side of a comparison before they are reported, so most sections stay quiet until you add more.
         </div>
       )}
 
       {neutral.length > 0 && (
         <div style={{ background: 'rgba(136,136,170,0.08)', border: '1px solid var(--border)', borderRadius: 10, padding: '14px 18px', marginBottom: 24, fontSize: 13, lineHeight: 1.6 }}>
-          <strong style={{ color: 'var(--text)' }}>Neutral patterns detected</strong> — this wording appears at similar rates in top and bottom converters and does not measurably move conversion:{' '}
+          <strong style={{ color: 'var(--text)' }}>Neutral patterns detected</strong>. this wording appears at similar rates in top and bottom converters and does not measurably move conversion:{' '}
           {neutral.map((p, i) => <span key={i}><strong style={{ color: 'var(--text)' }}>{p.label}</strong>{i < neutral.length - 1 ? ', ' : ''}</span>)}. Do not rely on these as levers.
         </div>
       )}
@@ -346,11 +346,11 @@ Be specific. Quote actual copy. Reference actual numbers. No emojis. Max 400 wor
               <div className="card-title">{title}</div>
               {list.map((f, i) => (
                 <div key={f.id} style={{ display: 'flex', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
-                  <div style={{ width: 24, height: 24, borderRadius: 6, background: !isBottom && i === 0 ? 'rgba(255,209,102,0.2)' : 'var(--surface2)', color: isBottom ? 'var(--accent2)' : (i === 0 ? 'var(--gold)' : 'var(--muted)'), display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700, flexShrink: 0, marginTop: 2 }}>{i + 1}</div>
+                  <div style={{ width: 24, height: 24, borderRadius: 6, background: !isBottom && i === 0 ? 'rgba(245,158,11,0.2)' : 'var(--surface2)', color: isBottom ? 'var(--accent2)' : (i === 0 ? 'var(--gold)' : 'var(--muted)'), display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700, flexShrink: 0, marginTop: 2 }}>{i + 1}</div>
                   <div style={{ flex: 1 }}>
                     <strong style={{ fontSize: 13, color: 'var(--text)' }}>{f.name}</strong>
                     <div style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic', lineHeight: 1.5, margin: '4px 0', borderLeft: '2px solid var(--border)', paddingLeft: 8 }}>"{f.m1_message}"</div>
-                    {f.m1_cta && <div style={{ fontSize: 11, color: isBottom ? '#ff8099' : 'var(--accent3)', fontFamily: 'var(--mono)', marginBottom: 4 }}>CTA: "{f.m1_cta}"</div>}
+                    {f.m1_cta && <div style={{ fontSize: 11, color: isBottom ? '#E5484D' : 'var(--accent3)', fontFamily: 'var(--mono)', marginBottom: 4 }}>CTA: "{f.m1_cta}"</div>}
                     <div style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>
                       <span style={{ color: colorFor(f.m1_ctr_pct, 30, 60), fontWeight: 700 }}>{pct(f.m1_ctr_pct)} CTR</span>
                       <span style={{ color: 'var(--muted)', margin: '0 6px' }}>·</span>
@@ -383,7 +383,7 @@ Be specific. Quote actual copy. Reference actual numbers. No emojis. Max 400 wor
               {positive.map((p, i) => (
                 <div key={i} style={rowStyle}>
                   <strong style={{ color: 'var(--accent3)' }}>{p.label}</strong>
-                  {' '}— {p.count} funnels use this at <strong style={{ color: 'var(--accent3)' }}>{pct(p.matchedAvg)}</strong> average CTR vs {pct(p.notMatchedAvg)} across the {p.compareCount} without it ({ppLabel(p.delta)})
+                  {'. '}{p.count} funnels use this at <strong style={{ color: 'var(--accent3)' }}>{pct(p.matchedAvg)}</strong> average CTR vs {pct(p.notMatchedAvg)} across the {p.compareCount} without it ({ppLabel(p.delta)})
                 </div>
               ))}
             </div>
@@ -391,11 +391,11 @@ Be specific. Quote actual copy. Reference actual numbers. No emojis. Max 400 wor
 
           {neutral.length > 0 && (
             <div className="card" style={{ marginBottom: 16 }}>
-              <div className="card-title">Neutral Patterns — No Measurable Impact</div>
+              <div className="card-title">Neutral Patterns. No Measurable Impact</div>
               {neutral.map((p, i) => (
                 <div key={i} style={rowStyle}>
                   <strong style={{ color: 'var(--text)' }}>{p.label}</strong>
-                  {' '}— in {Math.round(p.topRate * 100)}% of top converters and {Math.round(p.bottomRate * 100)}% of bottom converters. Delta {ppLabel(p.delta)}
+                  {'. '}in {Math.round(p.topRate * 100)}% of top converters and {Math.round(p.bottomRate * 100)}% of bottom converters. Delta {ppLabel(p.delta)}
                 </div>
               ))}
             </div>
@@ -407,7 +407,7 @@ Be specific. Quote actual copy. Reference actual numbers. No emojis. Max 400 wor
               {negative.map((p, i) => (
                 <div key={i} style={rowStyle}>
                   <strong style={{ color: 'var(--accent2)' }}>{p.label}</strong>
-                  {' '}— {p.count} funnels average <strong style={{ color: 'var(--accent2)' }}>{pct(p.matchedAvg)}</strong> CTR vs {pct(p.notMatchedAvg)} across the {p.compareCount} without it ({ppLabel(p.delta)})
+                  {'. '}{p.count} funnels average <strong style={{ color: 'var(--accent2)' }}>{pct(p.matchedAvg)}</strong> CTR vs {pct(p.notMatchedAvg)} across the {p.compareCount} without it ({ppLabel(p.delta)})
                 </div>
               ))}
             </div>
@@ -424,8 +424,8 @@ Be specific. Quote actual copy. Reference actual numbers. No emojis. Max 400 wor
       {tab === 'structure' && (
         <div>
           {unweightedCount > 0 && (
-            <div style={{ background: 'rgba(255,209,102,0.07)', border: '1px solid rgba(255,209,102,0.25)', borderRadius: 10, padding: '12px 18px', marginBottom: 16, fontSize: 13, color: 'var(--text)', lineHeight: 1.6 }}>
-              <strong style={{ color: 'var(--gold)' }}>{unweightedCount} funnel{unweightedCount === 1 ? '' : 's'} using majority path CR</strong> — these were uploaded before branch capture, so their end to end CR counts only the largest branch and understates the true result. Re-upload their screenshots to get the weighted figure.
+            <div style={{ background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.25)', borderRadius: 10, padding: '12px 18px', marginBottom: 16, fontSize: 13, color: 'var(--text)', lineHeight: 1.6 }}>
+              <strong style={{ color: 'var(--gold)' }}>{unweightedCount} funnel{unweightedCount === 1 ? '' : 's'} using majority path CR</strong>. these were uploaded before branch capture, so their end to end CR counts only the largest branch and understates the true result. Re upload their screenshots to get the weighted figure.
             </div>
           )}
 
@@ -434,7 +434,7 @@ Be specific. Quote actual copy. Reference actual numbers. No emojis. Max 400 wor
             {corr != null ? (
               <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.8 }}>
                 Correlation across {withBoth.length} funnels: <strong style={{ color: colorFor(Math.abs(corr) * 100, 40, 70) }}>{corr}</strong>
-                {' '}— {Math.abs(corr) >= 0.7
+                {'. '}{Math.abs(corr) >= 0.7
                   ? 'Strong. Funnels that win at M1 keep winning downstream, so first message copy is your highest leverage move.'
                   : Math.abs(corr) >= 0.4
                   ? 'Moderate. M1 matters but downstream steps carry real independent weight.'
@@ -485,7 +485,7 @@ Be specific. Quote actual copy. Reference actual numbers. No emojis. Max 400 wor
               <div className="card-title">Average Per Step CTR by Position</div>
               <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', marginBottom: 14 }}>
                 Each step measured against its own sent count, so this reflects message strength rather than the automatic decline of a cumulative figure
-                {steepestDrop && steepestDrop.drop > 0 && <span> — steepest fall is M{steepestDrop.from} to M{steepestDrop.to} at {steepestDrop.drop}pp</span>}
+                {steepestDrop && steepestDrop.drop > 0 && <span>. steepest fall is M{steepestDrop.from} to M{steepestDrop.to} at {steepestDrop.drop}pp</span>}
               </div>
               {stepPositionData.map((d, i) => (
                 <BarRow

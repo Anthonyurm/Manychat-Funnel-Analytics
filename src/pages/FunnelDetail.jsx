@@ -90,8 +90,8 @@ export default function FunnelDetail() {
       </div>
 
       {wasUpdated && (
-        <div style={{ background: 'rgba(255,209,102,0.07)', border: '1px solid rgba(255,209,102,0.25)', borderRadius: 10, padding: '12px 18px', marginBottom: 20, fontSize: 13, color: 'var(--text)' }}>
-          <strong style={{ color: 'var(--gold)' }}>Funnel updated mid-run</strong> — one or more steps show fewer entries than expected from the previous step. Numbers marked with <strong style={{ color: 'var(--gold)' }}>~</strong> have been recalculated to reflect the actual current cohort. Raw original numbers are shown in parentheses where they differ.
+        <div style={{ background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.25)', borderRadius: 10, padding: '12px 18px', marginBottom: 20, fontSize: 13, color: 'var(--text)' }}>
+          <strong style={{ color: 'var(--gold)' }}>Funnel updated mid run</strong>. one or more steps show fewer entries than expected from the previous step. Numbers marked with <strong style={{ color: 'var(--gold)' }}>~</strong> have been recalculated to reflect the actual current cohort. Raw original numbers are shown in parentheses where they differ.
         </div>
       )}
 
@@ -109,7 +109,7 @@ export default function FunnelDetail() {
             const displayClicked = norm?.effectiveClicked ?? m?.clicked
             const wasAdjusted = norm?.wasAdjusted || false
 
-            // Drop-off between this step and previous
+            // Drop off between this step and previous
             const prevNorm = i > 0 && !isGoal ? normalised[i - 1] : null
             const prevEffectiveSent = prevNorm?.effectiveSent
             const dropPct = prevEffectiveSent && displaySent && !isGoal
@@ -145,7 +145,7 @@ export default function FunnelDetail() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                     <div style={{ fontWeight: 700, fontSize: 13 }}>{step.label}</div>
                     {wasAdjusted && (
-                      <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--gold)', letterSpacing: 0.5 }} title="Numbers recalculated — funnel was updated mid-run">ADJUSTED</span>
+                      <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--gold)', letterSpacing: 0.5 }} title="Numbers recalculated. This funnel was updated mid run.">ADJUSTED</span>
                     )}
                   </div>
 
@@ -254,7 +254,7 @@ export default function FunnelDetail() {
                     <td style={{ fontWeight: 700, color: colorFor(val, 20, 50) }}>{pct(val)}</td>
                     <td style={{ color: 'var(--muted)' }}>{pct(avg)}</td>
                     <td style={{ fontFamily: 'var(--mono)', fontSize: 12, color: delta != null ? (parseFloat(delta) >= 0 ? 'var(--accent3)' : 'var(--accent2)') : 'var(--muted)' }}>
-                      {delta != null ? (parseFloat(delta) >= 0 ? '+' : '') + delta + 'pp' : '—'}
+                      {delta != null ? (parseFloat(delta) >= 0 ? '+' : '') + delta + 'pp' : 'n/a'}
                     </td>
                   </tr>
                 )
