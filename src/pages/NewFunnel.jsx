@@ -5,33 +5,43 @@ import { VERSIONS } from '../components/UI'
 
 const VISION_PROMPT = `You are analyzing ManyChat flow builder screenshots for a music artist's Instagram DM automation. Treat all images as one continuous flow reading left to right.
 
-EXTRACTION RULES. follow every rule exactly:
+WHAT COUNTS AS A STEP
 
-1. ONLY extract Instagram Send Message nodes. SKIP everything else without exception: Condition nodes, Action nodes, Smart Delay nodes, When/trigger nodes, External Request nodes, Waiting nodes.
+1. Only extract Instagram Send Message nodes. Ignore Condition nodes, Action nodes, Smart Delay nodes, When and trigger nodes, External Request nodes, and Waiting nodes entirely.
 
-2. A single Send Message node can contain multiple message bubbles stacked vertically. Do NOT split these into separate steps. One node header ("Instagram / Send Message #X") = one step. Combine all message text from the same node into one message_text field.
+2. One node header ("Instagram / Send Message #X") is exactly one step, even when the node contains several message bubbles stacked vertically. Combine all of that node's text into a single message_text field. Never split one node into two steps.
 
-3. SKIP any Send Message node where Clicked is 0% and there is no actionable CTA button. these are automated delivery nodes (e.g. "song unlocked", "here's your link"). The next Send Message node after it becomes the next numbered step.
+3. Skip a node only when it has no clickable CTA button AND its Clicked figure is 0. These are delivery nodes such as "song unlocked" or "here is your link". When you skip one, carry on to the next Send Message node and number it as the next step.
 
-4. SKIP any Send Message node where Sent is less than 20% of the previous included Send Message node's Sent count. These are minority path branches.
+HOW TO FOLLOW THE PATH
 
-5. At every split point where a message has multiple CTA buttons, you MUST compare the actual CTR percentage numbers shown next to each button. Follow ONLY the path triggered by the button with the NUMERICALLY HIGHEST CTR percentage. This is critical. do not guess based on button label or position. Read the actual number shown (e.g. "CTR 54%" beats "CTR 18%"). Record ALL button labels and their exact CTR percentages in branch_metadata.
+4. Follow the flow all the way to its end. Do not stop early. A funnel commonly runs five or more steps.
 
-6. Label messages M1, M2, M3 etc in order following the majority path only, left to right and top to bottom across all images.
+5. A large fall in Sent between one step and the next is normal and expected. It happens when a Condition filters the audience, when a split divides traffic across several buttons, or when the funnel was edited while it was running. Never drop a node just because its Sent count is far smaller than the node before it. That drop is meaningful data and must be preserved.
 
-7. Compute ctr_raw = Clicked / Sent using the raw counts shown. Compute open_rate_raw = Opened / Sent. Convert any percentage shown (e.g. 56.7%) to a decimal (0.567).
+6. The 20 percent test applies only between siblings, meaning two or more nodes fed by the same split or condition. Among siblings, keep the one you are following and ignore the rest. Never apply this test along the sequence.
 
-8. Separately from the majority path steps, list EVERY terminal endpoint in the whole flow in terminal_outcomes, including endpoints on minority branches you did not number as steps. A terminal endpoint is the last Send Message node on a path that has a clickable CTA. Report its own sent and clicked counts. Do not include a node more than once, and do not include intermediate nodes, otherwise the end to end rate will double count. If the flow is purely linear with no branches, terminal_outcomes contains exactly one entry for the final step.
+7. At a split where one message offers several CTA buttons, compare the CTR percentages printed beside each button and follow only the numerically highest one. Read the actual number rather than inferring from the label or position, so "CTR 54%" beats "CTR 18%". Record every button label with its exact CTR in branch_metadata.
 
-Return ONLY this exact JSON with no markdown and no explanation text:
+8. Number the steps M1, M2, M3 and so on along the path you followed, left to right and top to bottom across all images.
+
+9. If you are unsure whether a node belongs in the sequence, include it and say why in its notes field. A step wrongly included can be deleted in one click. A step wrongly dropped is invisible and silently corrupts the analysis.
+
+NUMBERS
+
+10. Compute ctr_raw as Clicked divided by Sent using the raw counts shown, and open_rate_raw as Opened divided by Sent. Convert a printed percentage such as 56.7% to the decimal 0.567.
+
+11. List every terminal endpoint of the whole flow in terminal_outcomes, including endpoints on branches you did not number as steps. A terminal endpoint is the last Send Message node on a path that carries a clickable CTA. Give its own sent and clicked counts. Never list a node twice and never list an intermediate node, otherwise the end to end rate double counts. A purely linear flow has exactly one entry.
+
+Return ONLY this JSON, with no markdown fences and no explanation:
 {
   "steps": [
     {
       "order": 1,
       "label": "M1",
       "type": "message",
-      "message_text": "exact message copy from node",
-      "cta_text": "label of the highest-CTR button or null if no buttons",
+      "message_text": "exact message copy from the node",
+      "cta_text": "label of the highest CTR button, or null if the node has none",
       "sent": 3391,
       "opened": 2427,
       "clicked": 1913,
@@ -44,7 +54,7 @@ Return ONLY this exact JSON with no markdown and no explanation text:
     {
       "from_order": 1,
       "to_order": 2,
-      "label": "label of highest-CTR button",
+      "label": "label of the highest CTR button",
       "branch_metadata": {
         "total_sent_at_split": 147,
         "branches": [
@@ -58,7 +68,7 @@ Return ONLY this exact JSON with no markdown and no explanation text:
     { "label": "join joy club", "path": "no but tell me more", "sent": 79, "clicked": 57 },
     { "label": "day one thanks", "path": "yes i joined", "sent": 26, "clicked": 8 }
   ],
-  "funnel_notes": "summary of which branches were followed and why"
+  "funnel_notes": "which branch was followed at each split, and any node you were unsure about"
 }`
 
 export default function NewFunnel() {
