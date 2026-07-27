@@ -138,8 +138,8 @@ Be specific. Quote actual copy. Reference actual numbers. No emojis. Max 400 wor
     <div className="empty-state"><h3>No funnels yet</h3><p>Add funnels to see message analysis.</p></div>
   )
 
-  const { funnels, versions, buildAverages } = data
-  const filtered = versionFilter === 'all' ? funnels : funnels.filter(f => f.version === versionFilter)
+  const { clean, versions, buildAverages, flagged } = data
+  const filtered = versionFilter === 'all' ? clean : clean.filter(f => f.version === versionFilter)
   const filteredAvgs = buildAverages(versionFilter === 'all' ? null : versionFilter)
   const withMsgs = filtered.filter(f => f.m1_message && f.m1_ctr_pct != null)
   const ranked = [...withMsgs].sort((a, b) => (b.m1_ctr_pct || 0) - (a.m1_ctr_pct || 0))
@@ -304,7 +304,7 @@ Be specific. Quote actual copy. Reference actual numbers. No emojis. Max 400 wor
       <div className="page-header">
         <div>
           <div className="page-title">Message Intelligence</div>
-          <div className="page-subtitle">What wording and structure converts best across your funnels</div>
+          <div className="page-subtitle">Which words and which shapes of funnel actually convert</div>
         </div>
         <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
           <div className="version-filter">
@@ -322,13 +322,13 @@ Be specific. Quote actual copy. Reference actual numbers. No emojis. Max 400 wor
 
       {withMsgs.length < 6 && (
         <div style={{ background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.25)', borderRadius: 10, padding: '12px 18px', marginBottom: 20, fontSize: 13, color: 'var(--text)', lineHeight: 1.6 }}>
-          <strong style={{ color: 'var(--gold)' }}>Small sample</strong>. {withMsgs.length} funnel{withMsgs.length === 1 ? '' : 's'} in this view. Patterns need at least {MIN_PATTERN_MATCHES} funnels on each side of a comparison before they are reported, so most sections stay quiet until you add more.
+          Only {withMsgs.length} funnel{withMsgs.length === 1 ? '' : 's'} here. Most of this page stays empty until there are enough to compare, which takes at least {MIN_PATTERN_MATCHES} on each side.
         </div>
       )}
 
       {neutral.length > 0 && (
         <div style={{ background: 'rgba(136,136,170,0.08)', border: '1px solid var(--border)', borderRadius: 10, padding: '14px 18px', marginBottom: 24, fontSize: 13, lineHeight: 1.6 }}>
-          <strong style={{ color: 'var(--text)' }}>Neutral patterns detected</strong>. this wording appears at similar rates in top and bottom converters and does not measurably move conversion:{' '}
+          The wording below turns up just as often in your best funnels as your worst, so it is not doing anything either way:{' '}
           {neutral.map((p, i) => <span key={i}><strong style={{ color: 'var(--text)' }}>{p.label}</strong>{i < neutral.length - 1 ? ', ' : ''}</span>)}. Do not rely on these as levers.
         </div>
       )}
@@ -341,7 +341,7 @@ Be specific. Quote actual copy. Reference actual numbers. No emojis. Max 400 wor
 
       {tab === 'ranking' && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
-          {[['Top Converting M1 Messages', ranked.slice(0, 7), false], ['Lowest Converting M1 Messages', bottom, true]].map(([title, list, isBottom]) => (
+          {[['Best first messages', ranked.slice(0, 7), false], ['Weakest first messages', bottom, true]].map(([title, list, isBottom]) => (
             <div className="card" key={title}>
               <div className="card-title">{title}</div>
               {list.map((f, i) => (
@@ -369,9 +369,9 @@ Be specific. Quote actual copy. Reference actual numbers. No emojis. Max 400 wor
         <div>
           {lengthData.length > 0 ? (
             <div className="card" style={{ marginBottom: 16 }}>
-              <div className="card-title">Message Length vs M1 CTR</div>
+              <div className="card-title">Does message length matter</div>
               <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', marginBottom: 14 }}>
-                Buckets with fewer than {MIN_BUCKET} funnels are hidden
+                Groups with fewer than {MIN_BUCKET} funnels are left out
               </div>
               {lengthData.map((d, i) => <BarRow key={i} label={d.label} value={d.avgCtr} sub={`${d.count} funnel${d.count !== 1 ? 's' : ''}`} />)}
             </div>
@@ -379,7 +379,7 @@ Be specific. Quote actual copy. Reference actual numbers. No emojis. Max 400 wor
 
           {positive.length > 0 && (
             <div className="card" style={{ marginBottom: 16 }}>
-              <div className="card-title">Patterns That Help Conversion</div>
+              <div className="card-title">What is working</div>
               {positive.map((p, i) => (
                 <div key={i} style={rowStyle}>
                   <strong style={{ color: 'var(--accent3)' }}>{p.label}</strong>
@@ -391,7 +391,7 @@ Be specific. Quote actual copy. Reference actual numbers. No emojis. Max 400 wor
 
           {neutral.length > 0 && (
             <div className="card" style={{ marginBottom: 16 }}>
-              <div className="card-title">Neutral Patterns. No Measurable Impact</div>
+              <div className="card-title">Makes no difference either way</div>
               {neutral.map((p, i) => (
                 <div key={i} style={rowStyle}>
                   <strong style={{ color: 'var(--text)' }}>{p.label}</strong>
@@ -403,7 +403,7 @@ Be specific. Quote actual copy. Reference actual numbers. No emojis. Max 400 wor
 
           {negative.length > 0 && (
             <div className="card" style={{ marginBottom: 16 }}>
-              <div className="card-title">Patterns That Hurt Conversion</div>
+              <div className="card-title">What is costing you</div>
               {negative.map((p, i) => (
                 <div key={i} style={rowStyle}>
                   <strong style={{ color: 'var(--accent2)' }}>{p.label}</strong>
@@ -415,7 +415,7 @@ Be specific. Quote actual copy. Reference actual numbers. No emojis. Max 400 wor
 
           {positive.length === 0 && neutral.length === 0 && negative.length === 0 && lengthData.length === 0 && (
             <NotEnoughData>
-              No pattern meets the reporting threshold yet. A pattern needs at least {MIN_PATTERN_MATCHES} funnels containing it and {MIN_PATTERN_MATCHES} without it before a verdict is shown.
+              Nothing here yet. Before the app calls something a pattern it wants to see it in at least {MIN_PATTERN_MATCHES} funnels and absent from {MIN_PATTERN_MATCHES} others.
             </NotEnoughData>
           )}
         </div>
@@ -425,27 +425,27 @@ Be specific. Quote actual copy. Reference actual numbers. No emojis. Max 400 wor
         <div>
           {unweightedCount > 0 && (
             <div style={{ background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.25)', borderRadius: 10, padding: '12px 18px', marginBottom: 16, fontSize: 13, color: 'var(--text)', lineHeight: 1.6 }}>
-              <strong style={{ color: 'var(--gold)' }}>{unweightedCount} funnel{unweightedCount === 1 ? '' : 's'} using majority path CR</strong>. these were uploaded before branch capture, so their end to end CR counts only the largest branch and understates the true result. Re upload their screenshots to get the weighted figure.
+              {unweightedCount} funnel{unweightedCount === 1 ? ' was' : 's were'} uploaded before the app started tracking branches, so the conversion rate only counts the busiest path and reads lower than reality. Upload those screenshots again to fix it.
             </div>
           )}
 
           <div className="card" style={{ marginBottom: 16 }}>
-            <div className="card-title">M1 CTR as a Predictor of Downstream CR</div>
+            <div className="card-title">Does a strong opener predict a strong finish</div>
             {corr != null ? (
               <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.8 }}>
                 Correlation across {withBoth.length} funnels: <strong style={{ color: colorFor(Math.abs(corr) * 100, 40, 70) }}>{corr}</strong>
                 {'. '}{Math.abs(corr) >= 0.7
-                  ? 'Strong. Funnels that win at M1 keep winning downstream, so first message copy is your highest leverage move.'
+                  ? 'Strong. Funnels that win at M1 keep winning after it, so the opener is where to spend your time.'
                   : Math.abs(corr) >= 0.4
-                  ? 'Moderate. M1 matters but downstream steps carry real independent weight.'
-                  : 'Weak. A strong first message does not predict what happens after it. Optimise the middle of the funnel.'}
+                  ? 'Moderate. The opener matters, but what comes after it matters on its own terms too.'
+                  : 'Weak. A strong opener tells you nothing about how the funnel finishes, so look at the middle.'}
                 <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', marginTop: 10 }}>
-                  Measured against downstream CR (terminal clicks divided by M1 clicks) rather than funnel CR, which shares a denominator with M1 CTR and would correlate on arithmetic alone.
+                  This compares M1 CTR against what happens after M1. Comparing it to overall funnel CR would look impressive and mean nothing, because both numbers are divided by the same figure.
                 </div>
               </div>
             ) : (
               <div style={{ color: 'var(--muted)', fontFamily: 'var(--mono)', fontSize: 12, lineHeight: 1.7 }}>
-                Needs {MIN_CORRELATION_N} funnels before a coefficient is meaningful. Currently {withBoth.length}.
+                You need {MIN_CORRELATION_N} funnels before this number means anything. You have {withBoth.length}.
               </div>
             )}
 
@@ -465,16 +465,16 @@ Be specific. Quote actual copy. Reference actual numbers. No emojis. Max 400 wor
 
           {stepCrData.length > 1 && (
             <div className="card" style={{ marginBottom: 16 }}>
-              <div className="card-title">Number of Steps vs End to End CR</div>
+              <div className="card-title">Does funnel length matter</div>
               {stepCrData.map((d, i) => <BarRow key={i} label={`${d.key} step${d.key !== 1 ? 's' : ''}`} value={d.avg} accentLow={15} accentHigh={40} sub={`${d.count} funnel${d.count !== 1 ? 's' : ''}`} />)}
             </div>
           )}
 
           {branchCrData.length > 1 && (
             <div className="card" style={{ marginBottom: 16 }}>
-              <div className="card-title">Number of Branches vs End to End CR</div>
+              <div className="card-title">Does branching pay off</div>
               <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', marginBottom: 14 }}>
-                Does splitting the audience into personalised paths actually pay off
+                Whether sending people down different paths earns back the complexity
               </div>
               {branchCrData.map((d, i) => <BarRow key={i} label={d.key === 0 ? 'Linear (no branches)' : `${d.key} branch point${d.key !== 1 ? 's' : ''}`} value={d.avg} accentLow={15} accentHigh={40} sub={`${d.count} funnel${d.count !== 1 ? 's' : ''}`} />)}
             </div>
@@ -482,10 +482,10 @@ Be specific. Quote actual copy. Reference actual numbers. No emojis. Max 400 wor
 
           {stepPositionData.length > 1 && (
             <div className="card" style={{ marginBottom: 16 }}>
-              <div className="card-title">Average Per Step CTR by Position</div>
+              <div className="card-title">Where people drop out</div>
               <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', marginBottom: 14 }}>
-                Each step measured against its own sent count, so this reflects message strength rather than the automatic decline of a cumulative figure
-                {steepestDrop && steepestDrop.drop > 0 && <span>. steepest fall is M{steepestDrop.from} to M{steepestDrop.to} at {steepestDrop.drop}pp</span>}
+                Each step is measured against the people who actually received it, so a low bar means a weak message rather than just a smaller audience
+                {steepestDrop && steepestDrop.drop > 0 && <span>. Biggest fall is between M{steepestDrop.from} to M{steepestDrop.to} at {steepestDrop.drop}pp</span>}
               </div>
               {stepPositionData.map((d, i) => (
                 <BarRow
@@ -504,7 +504,7 @@ Be specific. Quote actual copy. Reference actual numbers. No emojis. Max 400 wor
           )}
 
           {stepCrData.length <= 1 && branchCrData.length <= 1 && stepPositionData.length <= 1 && (
-            <NotEnoughData>Add more funnels to compare structure against conversion.</NotEnoughData>
+            <NotEnoughData>Add a few more funnels and this will start comparing shapes against results.</NotEnoughData>
           )}
         </div>
       )}
@@ -513,7 +513,7 @@ Be specific. Quote actual copy. Reference actual numbers. No emojis. Max 400 wor
         <div>
           {streamingEntries.length > 0 && (
             <div className="card" style={{ marginBottom: 16 }}>
-              <div className="card-title">Streaming Platform Distribution</div>
+              <div className="card-title">Where your audience listens</div>
               <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', marginBottom: 14 }}>
                 Share of {streamingGrandTotal.toLocaleString()} platform selections across every funnel that asks
               </div>
@@ -528,7 +528,7 @@ Be specific. Quote actual copy. Reference actual numbers. No emojis. Max 400 wor
                 </div>
               ))}
               <div style={{ marginTop: 12, fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}>
-                Use this to decide where distribution and promotion spend actually lands.
+                This is where your promotion budget should go.
               </div>
             </div>
           )}
@@ -536,7 +536,7 @@ Be specific. Quote actual copy. Reference actual numbers. No emojis. Max 400 wor
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
             {avgHeardRatio != null && (
               <div className="card" style={{ marginBottom: 0 }}>
-                <div className="card-title">Heard Your Music Before</div>
+                <div className="card-title">Already knew your music</div>
                 <div style={{ fontSize: 36, fontWeight: 800, color: colorFor(avgHeardRatio, 30, 60), letterSpacing: -1, marginBottom: 8 }}>{avgHeardRatio}%</div>
                 <div style={{ fontSize: 13, color: 'var(--muted)', lineHeight: 1.6 }}>
                   across {heardMusicRatios.length} split{heardMusicRatios.length === 1 ? '' : 's'}. {avgHeardRatio >= 50
@@ -547,7 +547,7 @@ Be specific. Quote actual copy. Reference actual numbers. No emojis. Max 400 wor
             )}
             {avgCommunityRate != null && (
               <div className="card" style={{ marginBottom: 0 }}>
-                <div className="card-title">Community Engagement Rate</div>
+                <div className="card-title">Already in your community</div>
                 <div style={{ fontSize: 36, fontWeight: 800, color: colorFor(avgCommunityRate, 15, 35), letterSpacing: -1, marginBottom: 8 }}>{avgCommunityRate}%</div>
                 <div style={{ fontSize: 13, color: 'var(--muted)', lineHeight: 1.6 }}>
                   across {communityJoinRates.length} split{communityJoinRates.length === 1 ? '' : 's'}. {avgCommunityRate >= 30
@@ -560,7 +560,7 @@ Be specific. Quote actual copy. Reference actual numbers. No emojis. Max 400 wor
 
           {streamingEntries.length === 0 && avgHeardRatio == null && avgCommunityRate == null && (
             <NotEnoughData>
-              Audience signals come from multi button splits such as streaming platform choice or a heard my music question. Upload funnels containing those steps to populate this tab.
+              This tab reads from questions that give people a choice, like which streaming service they use. Upload a funnel that asks one and the numbers appear here.
             </NotEnoughData>
           )}
         </div>

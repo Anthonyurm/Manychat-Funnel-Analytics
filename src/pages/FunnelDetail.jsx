@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { getFunnel, deleteFunnel, upsertMetric, computeOverview, getFunnels, normaliseSteps } from '../lib/db'
+import { getFunnel, deleteFunnel, deleteStep, upsertMetric, computeOverview, getFunnels, normaliseSteps } from '../lib/db'
 import { Bar, Badge, Spinner, pct, num, colorFor } from '../components/UI'
 
 export default function FunnelDetail() {
@@ -12,6 +12,7 @@ export default function FunnelDetail() {
   const [editing, setEditing] = useState(null)
   const [editVals, setEditVals] = useState({})
   const [saving, setSaving] = useState(false)
+  const [removingStep, setRemovingStep] = useState(null)
 
   useEffect(() => {
     Promise.all([getFunnel(id), getFunnels()])
@@ -27,6 +28,15 @@ export default function FunnelDetail() {
     if (!confirm('Delete this funnel? This cannot be undone.')) return
     await deleteFunnel(id)
     navigate('/')
+  }
+
+  async function removeStep(stepId, label) {
+    if (!confirm(`Remove ${label} from this funnel? The other steps renumber around it.`)) return
+    setRemovingStep(stepId)
+    await deleteStep(stepId)
+    const updated = await getFunnel(id)
+    setFunnel(updated)
+    setRemovingStep(null)
   }
 
   async function saveMetric(stepId) {
@@ -51,6 +61,9 @@ export default function FunnelDetail() {
   const normalised = normaliseSteps(msgSteps)
   const effectiveSent = normalised[0]?.effectiveSent || null
   const wasUpdated = normalised.some(n => n.wasAdjusted)
+  const chainValid = normalised[0]?.chainValid !== false
+  const chainIssues = normalised[0]?.chainIssues || []
+  const badStepIndexes = new Set(chainIssues.map(i => i.at))
 
   // Funnel CR for this funnel
   const lastN = [...normalised].reverse().find(n => n.effectiveClicked)
@@ -89,9 +102,21 @@ export default function FunnelDetail() {
         <button className="btn btn-danger btn-sm" onClick={handleDelete}>Delete Funnel</button>
       </div>
 
-      {wasUpdated && (
-        <div style={{ background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.25)', borderRadius: 10, padding: '12px 18px', marginBottom: 20, fontSize: 13, color: 'var(--text)' }}>
-          <strong style={{ color: 'var(--gold)' }}>Funnel updated mid run</strong>. one or more steps show fewer entries than expected from the previous step. Numbers marked with <strong style={{ color: 'var(--gold)' }}>~</strong> have been recalculated to reflect the actual current cohort. Raw original numbers are shown in parentheses where they differ.
+      {!chainValid && (
+        <div style={{ background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.30)', borderRadius: 10, padding: '14px 18px', marginBottom: 20, fontSize: 13, color: 'var(--text)', lineHeight: 1.7 }}>
+          <div style={{ fontFamily: 'var(--display)', fontWeight: 600, color: 'var(--gold)', marginBottom: 8 }}>
+            One of these steps came from a different branch
+          </div>
+          {chainIssues.map((iss, i) => <div key={i} style={{ color: 'var(--muted)', fontSize: 12 }}>{iss.detail}</div>)}
+          <div style={{ marginTop: 8 }}>
+            The offending step is outlined below. Remove it and the numbers correct themselves. Until then this funnel stays out of your averages.
+          </div>
+        </div>
+      )}
+
+      {chainValid && wasUpdated && (
+        <div style={{ background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.25)', borderRadius: 10, padding: '12px 18px', marginBottom: 20, fontSize: 13, color: 'var(--text)', lineHeight: 1.7 }}>
+          You edited this funnel while it was running, so the early steps carry people who never saw the current version. Anything marked with a <span style={{ color: 'var(--gold)' }}>~</span> has been recalculated down to the cohort that actually went through it, with the original figure in brackets beside it.
         </div>
       )}
 
@@ -138,7 +163,8 @@ export default function FunnelDetail() {
                     </div>
                   </div>
                 )}
-                <div className={'step-card' + (isGoal ? ' goal' : '')}>
+                <div className={'step-card' + (isGoal ? ' goal' : '')}
+                  style={badStepIndexes.has(i + 1) ? { borderColor: 'var(--gold)', boxShadow: '0 0 0 1px var(--gold)' } : undefined}>
                   <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>
                     {isGoal ? 'Goal' : `Step ${step.step_order}`}
                   </div>
@@ -216,15 +242,24 @@ export default function FunnelDetail() {
                       )}
 
                       {!isGoal && (
+                        <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
                         <button
                           className="btn btn-ghost btn-sm"
-                          style={{ marginTop: 10, width: '100%' }}
+                          style={{ flex: 1 }}
                           onClick={() => {
                             setEditing(step.id)
                             setEditVals({ sent: m?.sent, opened: m?.opened, clicked: m?.clicked })
                           }}>
-                          Edit raw metrics
+                          Edit numbers
                         </button>
+                        <button
+                          className="btn btn-danger btn-sm"
+                          title="Remove this step from the funnel"
+                          disabled={removingStep === step.id}
+                          onClick={() => removeStep(step.id, step.label)}>
+                          {removingStep === step.id ? '...' : 'Remove'}
+                        </button>
+                        </div>
                       )}
                     </div>
                   )}

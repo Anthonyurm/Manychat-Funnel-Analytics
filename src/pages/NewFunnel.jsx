@@ -178,7 +178,7 @@ export default function NewFunnel() {
         <div>
           <div className="page-title">Add Funnel</div>
           <div className="page-subtitle">
-            Upload screenshots of your ManyChat flow. Every step, message, CTA, and metric is read automatically.
+            Screenshot your ManyChat flow and the app reads the steps, the copy and the numbers off it.
           </div>
         </div>
       </div>
@@ -257,14 +257,14 @@ export default function NewFunnel() {
 
             <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '18px 20px', marginTop: 16 }}>
               <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: 1.5, textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 12 }}>
-                How to take a good screenshot
+                Getting a clean read
               </div>
               {[
-                'Set your ManyChat flow builder zoom to 100% or higher so all text is sharp and fully readable.',
-                'Make sure every node shows its Sent, Opened, Clicked numbers and any button labels before screenshotting.',
-                'Do not crop out any nodes. if your flow is wider than one screen, take multiple overlapping screenshots and upload them all at once.',
-                'Avoid screenshotting on a small monitor or with browser zoom set below 100%. low resolution makes text unreadable for the AI.',
-                'If the AI misses a step or gets a number wrong, go into the funnel detail page and use the Edit raw metrics button to correct it.',
+                'Zoom the flow builder to 100% or more before you shoot. If the text is soft the AI guesses.',
+                'Check that every node is showing its Sent, Opened and Clicked numbers, and that button labels are readable.',
+                'Do not crop. A connector that runs off the edge of the image is a step the AI never sees.',
+                'Wide flows need more than one screenshot. Overlap them and upload them together.',
+                'If something comes back wrong, open the funnel and fix the numbers by hand. It takes a few seconds.',
               ].map((tip, i) => (
                 <div key={i} style={{ display: 'flex', gap: 12, padding: '7px 0', borderBottom: i < 4 ? '1px solid var(--border)' : 'none', fontSize: 13, color: 'var(--text)', lineHeight: 1.6 }}>
                   <span style={{ fontFamily: 'var(--mono)', color: 'var(--accent)', fontWeight: 700, flexShrink: 0, fontSize: 11, marginTop: 2 }}>{i + 1}.</span>

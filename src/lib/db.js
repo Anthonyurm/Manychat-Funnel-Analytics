@@ -264,7 +264,9 @@ function computeWeightedCr(funnel, msgSteps, goalStep, effectiveSent) {
 
   if (Array.isArray(outcomes) && outcomes.length) {
     const total = outcomes.reduce((s, o) => s + (Number(o?.clicked) || 0), 0)
-    if (total > 0) return { cr: total / effectiveSent, weighted: outcomes.length > 1 }
+    // One outcome means the flow is linear, which is complete data, not missing
+    // data. What matters is whether the parser captured endpoints at all.
+    if (total > 0) return { cr: total / effectiveSent, weighted: true }
   }
 
   // Majority fallback
@@ -351,10 +353,17 @@ export function computeOverview(funnels) {
 
   const maxSteps = Math.max(...rows.map(r => r.max_step || 1), 1)
 
+  // A funnel whose steps are not a single path produces numbers that are not
+  // wrong so much as meaningless, and one of them will drag every average and
+  // every comparison with it. Quarantine happens here rather than in each of
+  // the four analysis surfaces, so nothing downstream can consume it.
+  const clean = rows.filter(r => r.chain_valid !== false)
+  const flagged = rows.filter(r => r.chain_valid === false)
+
   // FIX 3: volume weight by effective sent. An unweighted mean let a 4 send
   // node move the average as much as a 3,391 send node.
   const avg = (key, versionFilter, { weighted = true } = {}) => {
-    const filtered = versionFilter ? rows.filter(r => r.version === versionFilter) : rows
+    const filtered = versionFilter ? clean.filter(r => r.version === versionFilter) : clean
     const usable = filtered.filter(r => r[key] != null)
     if (!usable.length) return null
     if (!weighted) {
@@ -382,7 +391,9 @@ export function computeOverview(funnels) {
   }
 
   return {
-    funnels: rows,
+    funnels: rows,      // everything, so the table can still show flagged rows
+    clean,              // the only set any analysis should read from
+    flagged,
     averages: buildAverages(null),
     maxSteps,
     buildAverages,

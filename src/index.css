@@ -1,7 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap');
 
 /* ─────────────────────────────────────────────────────────────
-   ELITE ARTIST SOCIETY — brand tokens
+   ELITE ARTIST SOCIETY brand tokens
    Cobalt for action. Violet for frameworks. Amber for risk.
    Mint for proof. Neutrals carry everything else.
    ───────────────────────────────────────────────────────────── */
@@ -15,10 +15,10 @@
   --muted: #9CA3AF;       /* text subtle */
 
   /* Brand accents */
-  --accent: #1E5BFF;      /* Electric Cobalt — CTAs, links, key metrics */
-  --violet: #7C3AED;      /* Deep Violet — frameworks, education, diagrams */
-  --gold: #F59E0B;        /* Signal Amber — risk and urgency only */
-  --accent3: #22C55E;     /* Support Mint — wins and proof */
+  --accent: #1E5BFF;      /* Electric Cobalt, for CTAs, links and key metrics */
+  --violet: #7C3AED;      /* Deep Violet, for frameworks and explanation */
+  --gold: #F59E0B;        /* Signal Amber, risk and urgency only */
+  --accent3: #22C55E;     /* Support Mint, wins and proof */
   --accent2: #E5484D;     /* data state only, underperformance */
 
   /* Type */
@@ -229,7 +229,7 @@ textarea.form-input { resize: vertical; min-height: 80px; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
 /* ─────────────────────────────────────────────────────────────
-   TYPOGRAPHY — Space Grotesk carries headlines, Inter carries
+   TYPOGRAPHY. Space Grotesk carries headlines, Inter carries
    everything read at length. Bold reserved for claims, numbers,
    and CTAs, never whole paragraphs.
    ───────────────────────────────────────────────────────────── */

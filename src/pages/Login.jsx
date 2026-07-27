@@ -33,7 +33,7 @@ export default function Login() {
             FUNNEL IQ
           </div>
           <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', marginTop: 6, letterSpacing: 1.5, textTransform: 'uppercase' }}>
-            Powered by The Elite Artist Society
+            Elite Artist Society
           </div>
         </div>
 
@@ -69,7 +69,7 @@ export default function Login() {
         </div>
 
         <div style={{ textAlign: 'center', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', marginTop: 20 }}>
-          Your data is private. only you can see your funnels.
+          Nobody else can see your funnels.
         </div>
       </div>
     </div>
