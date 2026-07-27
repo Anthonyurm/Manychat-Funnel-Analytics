@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { getFunnel, deleteFunnel, deleteStep, upsertMetric, computeOverview, getFunnels, normaliseSteps } from '../lib/db'
+import { getFunnel, deleteFunnel, deleteStep, updateStep, upsertMetric, computeOverview, getFunnels, normaliseSteps } from '../lib/db'
 import { Bar, Badge, Spinner, pct, num, colorFor } from '../components/UI'
 
 export default function FunnelDetail() {
@@ -8,6 +8,7 @@ export default function FunnelDetail() {
   const navigate = useNavigate()
   const [funnel, setFunnel] = useState(null)
   const [averages, setAverages] = useState(null)
+  const [overviewRow, setOverviewRow] = useState(null)
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState(null)
   const [editVals, setEditVals] = useState({})
@@ -18,7 +19,12 @@ export default function FunnelDetail() {
     Promise.all([getFunnel(id), getFunnels()])
       .then(([f, all]) => {
         setFunnel(f)
-        setAverages(computeOverview(all).averages)
+        const ov = computeOverview(all)
+        setOverviewRow(ov.funnels.find(r => r.id === id) || null)
+        // Leave one out: this funnel should not be part of the average it is
+        // being measured against. With a small account that bias is large.
+        const others = all.filter(f => f.id !== id)
+        setAverages(others.length ? computeOverview(others).averages : null)
       })
       .catch(console.error)
       .finally(() => setLoading(false))
@@ -34,7 +40,20 @@ export default function FunnelDetail() {
     if (!confirm(`Remove ${label} from this funnel? The other steps renumber around it.`)) return
     setRemovingStep(stepId)
     await deleteStep(stepId)
-    const updated = await getFunnel(id)
+    // Renumber what remains so labels always match positions. Without this a
+    // funnel that lost M3 keeps a step labelled M4 sitting in the M3 column.
+    let updated = await getFunnel(id)
+    const remaining = (updated.steps || [])
+      .filter(st => st.step_type !== 'goal')
+      .sort((a, b) => a.step_order - b.step_order)
+    for (let i = 0; i < remaining.length; i++) {
+      const wantOrder = i + 1
+      const wantLabel = `M${i + 1}`
+      if (remaining[i].step_order !== wantOrder || remaining[i].label !== wantLabel) {
+        await updateStep(remaining[i].id, { step_order: wantOrder, label: wantLabel })
+      }
+    }
+    updated = await getFunnel(id)
     setFunnel(updated)
     setRemovingStep(null)
   }
@@ -59,16 +78,15 @@ export default function FunnelDetail() {
 
   // Normalise: get effective sent/opened/clicked for every step
   const normalised = normaliseSteps(msgSteps)
-  const effectiveSent = normalised[0]?.effectiveSent || null
+  const effectiveSent = normalised[0]?.effectiveSent ?? null
   const wasUpdated = normalised.some(n => n.wasAdjusted)
   const chainValid = normalised[0]?.chainValid !== false
   const chainIssues = normalised[0]?.chainIssues || []
   const badStepIndexes = new Set(chainIssues.map(i => i.at))
 
-  // Funnel CR for this funnel
-  const lastN = [...normalised].reverse().find(n => n.effectiveClicked)
-  const lastClicks = goalStep?.step_metrics?.[0]?.clicked || lastN?.effectiveClicked
-  const thisFunnelCr = lastClicks && effectiveSent ? (lastClicks / effectiveSent * 100) : null
+  // The dashboard's figure, computed once in computeOverview, so the two
+  // screens can never disagree about the same funnel again
+  const thisFunnelCr = overviewRow?.funnel_cr_pct ?? null
 
   // M1 stats for vs average
   const n0 = normalised[0]
@@ -231,7 +249,7 @@ export default function FunnelDetail() {
                       )}
                       {cumulativeCtr != null && (
                         <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--mono)', fontSize: 11, padding: '3px 0' }}>
-                          <span style={{ color: 'var(--muted)' }}>cumulative CR</span>
+                          <span style={{ color: 'var(--muted)' }} title="Out of everyone who entered the funnel, the share that made it this far and clicked">still in from the start</span>
                           <span style={{ color: colorFor(parseFloat(cumulativeCtr), 15, 40), fontWeight: 700 }}>{cumulativeCtr}%</span>
                         </div>
                       )}
@@ -271,16 +289,16 @@ export default function FunnelDetail() {
       </div>
 
       {/* vs average */}
-      {averages && n0 && (
+      {averages && n0 && chainValid && (
         <div className="table-wrap">
-          <div className="table-header"><div className="table-title">vs. Your Average</div></div>
+          <div className="table-header"><div className="table-title">Against your other funnels</div></div>
           <table>
-            <thead><tr><th>Metric</th><th>This Funnel</th><th>Your Avg</th><th>Delta</th></tr></thead>
+            <thead><tr><th>Metric</th><th>This funnel</th><th>Others average</th><th>Gap</th></tr></thead>
             <tbody>
               {[
-                ['M1 Open Rate', thisM1OpenRate, averages.m1_open_rate_pct],
-                ['M1 CTR (cumulative)', thisM1Ctr, averages.m1_ctr_pct],
-                ['Funnel CR', thisFunnelCr, averages.funnel_cr_pct],
+                ['First message opened', thisM1OpenRate, averages.m1_open_rate_pct],
+                ['First message clicked', thisM1Ctr, averages.m1_ctr_pct],
+                ['Finish rate', thisFunnelCr, averages.funnel_cr_pct],
               ].map(([label, val, avg]) => {
                 const delta = val != null && avg != null ? (val - avg).toFixed(1) : null
                 return (

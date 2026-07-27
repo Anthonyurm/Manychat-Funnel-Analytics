@@ -236,7 +236,13 @@ Be specific. Quote actual copy. Reference actual numbers. No emojis. Max 400 wor
   const communityJoinRates = []
   const heardMusicRatios = []
 
-  rawFunnels.forEach(f => {
+  // Only funnels the validator trusts, and only the ones in the current
+  // filter, feed the audience numbers. The old version read everything, so a
+  // quarantined funnel or a filtered out type still moved these stats.
+  const trustedIds = new Set(filtered.map(f => f.id))
+  const audienceSource = rawFunnels.filter(f => trustedIds.has(f.id))
+
+  audienceSource.forEach(f => {
     if (!f.connections) return
     f.connections.forEach(conn => {
       if (!conn.branch_metadata) return
@@ -247,10 +253,15 @@ Be specific. Quote actual copy. Reference actual numbers. No emojis. Max 400 wor
         const totalSent = meta.total_sent_at_split || branches.reduce((s, b) => s + (b.sent || 0), 0)
         if (!totalSent) return
 
+        // One split belongs to one category. The old code let a Discord
+        // question ("yes i joined!") match the heard your music detector on
+        // the word yes, counting the same split in two stats at once.
+        const labelText = branches.map(b => b.label?.toLowerCase() || '').join(' ')
         const streamingLabels = ['spotify', 'apple', 'youtube', 'tidal', 'audiomack', 'amazon', 'soundcloud']
-        const isStreaming = branches.some(b => streamingLabels.some(p => b.label?.toLowerCase().includes(p)))
-        if (isStreaming) {
-          // FIX: accumulate a single shared denominator so shares sum to 100
+        const communityWords = ['discord', 'community', 'joined', 'join', 'member', 'group', 'patreon', 'whatsapp', 'club']
+        const heardWords = ['heard', 'listened', 'i have', 'not yet']
+
+        if (streamingLabels.some(p => labelText.includes(p))) {
           branches.forEach(b => {
             if (!b.label || !b.sent) return
             const platform = streamingLabels.find(p => b.label.toLowerCase().includes(p))
@@ -258,18 +269,12 @@ Be specific. Quote actual copy. Reference actual numbers. No emojis. Max 400 wor
             streamingTotals[platform] = (streamingTotals[platform] || 0) + b.sent
             streamingGrandTotal += b.sent
           })
-        }
-
-        const heardLabels = ['yes', 'heard', 'have', 'listened']
-        if (branches.some(b => heardLabels.some(l => b.label?.toLowerCase().includes(l)))) {
-          const yes = branches.find(b => heardLabels.some(l => b.label?.toLowerCase().includes(l)))
-          if (yes?.sent) heardMusicRatios.push(yes.sent / totalSent * 100)
-        }
-
-        const communityLabels = ['discord', 'community', 'joined', 'member', 'group', 'patreon', 'whatsapp']
-        if (branches.some(b => communityLabels.some(l => b.label?.toLowerCase().includes(l)))) {
-          const yes = branches.find(b => communityLabels.some(l => b.label?.toLowerCase().includes(l)))
+        } else if (communityWords.some(w => labelText.includes(w))) {
+          const yes = branches.find(b => /joined|member|in it|i'm in|yes/.test(b.label?.toLowerCase() || ''))
           if (yes?.sent) communityJoinRates.push(yes.sent / totalSent * 100)
+        } else if (heardWords.some(w => labelText.includes(w))) {
+          const yes = branches.find(b => /heard|listened|i have|yes/.test(b.label?.toLowerCase() || ''))
+          if (yes?.sent) heardMusicRatios.push(yes.sent / totalSent * 100)
         }
       } catch {}
     })
@@ -352,7 +357,7 @@ Be specific. Quote actual copy. Reference actual numbers. No emojis. Max 400 wor
                     <div style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic', lineHeight: 1.5, margin: '4px 0', borderLeft: '2px solid var(--border)', paddingLeft: 8 }}>"{f.m1_message}"</div>
                     {f.m1_cta && <div style={{ fontSize: 11, color: isBottom ? '#E5484D' : 'var(--accent3)', fontFamily: 'var(--mono)', marginBottom: 4 }}>CTA: "{f.m1_cta}"</div>}
                     <div style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>
-                      <span style={{ color: colorFor(f.m1_ctr_pct, 30, 60), fontWeight: 700 }}>{pct(f.m1_ctr_pct)} CTR</span>
+                      <span style={{ color: colorFor(f.m1_ctr_pct, 30, 60), fontWeight: 700 }}>{pct(f.m1_ctr_pct)} clicked</span>
                       <span style={{ color: 'var(--muted)', margin: '0 6px' }}>·</span>
                       <span style={{ color: 'var(--muted)' }}>{(f.effective_sent || 0).toLocaleString()} sent</span>
                       {(f.effective_sent || 0) < 100 && <span style={{ color: 'var(--gold)', marginLeft: 6 }}>low volume</span>}
@@ -383,7 +388,7 @@ Be specific. Quote actual copy. Reference actual numbers. No emojis. Max 400 wor
               {positive.map((p, i) => (
                 <div key={i} style={rowStyle}>
                   <strong style={{ color: 'var(--accent3)' }}>{p.label}</strong>
-                  {'. '}{p.count} funnels use this at <strong style={{ color: 'var(--accent3)' }}>{pct(p.matchedAvg)}</strong> average CTR vs {pct(p.notMatchedAvg)} across the {p.compareCount} without it ({ppLabel(p.delta)})
+                  {'. '}{p.count} funnels use this at <strong style={{ color: 'var(--accent3)' }}>{pct(p.matchedAvg)}</strong> clicked on average vs {pct(p.notMatchedAvg)} across the {p.compareCount} without it ({ppLabel(p.delta)})
                 </div>
               ))}
             </div>
@@ -407,7 +412,7 @@ Be specific. Quote actual copy. Reference actual numbers. No emojis. Max 400 wor
               {negative.map((p, i) => (
                 <div key={i} style={rowStyle}>
                   <strong style={{ color: 'var(--accent2)' }}>{p.label}</strong>
-                  {'. '}{p.count} funnels average <strong style={{ color: 'var(--accent2)' }}>{pct(p.matchedAvg)}</strong> CTR vs {pct(p.notMatchedAvg)} across the {p.compareCount} without it ({ppLabel(p.delta)})
+                  {'. '}{p.count} funnels average <strong style={{ color: 'var(--accent2)' }}>{pct(p.matchedAvg)}</strong> clicked vs {pct(p.notMatchedAvg)} across the {p.compareCount} without it ({ppLabel(p.delta)})
                 </div>
               ))}
             </div>
@@ -440,7 +445,7 @@ Be specific. Quote actual copy. Reference actual numbers. No emojis. Max 400 wor
                   ? 'Moderate. The opener matters, but what comes after it matters on its own terms too.'
                   : 'Weak. A strong opener tells you nothing about how the funnel finishes, so look at the middle.'}
                 <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', marginTop: 10 }}>
-                  This compares M1 CTR against what happens after M1. Comparing it to overall funnel CR would look impressive and mean nothing, because both numbers are divided by the same figure.
+                  This compares the first message clicked rate against what happens after it. Comparing it to the finish rate instead would look impressive and mean nothing, because both numbers are divided by the same figure.
                 </div>
               </div>
             ) : (

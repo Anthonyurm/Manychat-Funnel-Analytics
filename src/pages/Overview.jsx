@@ -36,11 +36,11 @@ function PatternSummary({ funnels, versionFilter }) {
   }
 
   if (m1Gap && parseFloat(m1Gap) > 10) {
-    insights.push(`First message CTR differs by ${m1Gap} points between your best and worst funnels. That is where the money is. Rewrite the weakest openers to match how your top funnels start.`)
+    insights.push(`First message clicked rate differs by ${m1Gap} points between your best and worst funnels. That is where the money is. Rewrite the weakest openers to match how your top funnels start.`)
   } else if (m1Gap && parseFloat(m1Gap) > 3) {
-    insights.push(`First message CTR differs by ${m1Gap} points between your best and worst funnels. Message Intelligence will show you which words separate them.`)
+    insights.push(`First message clicked rate differs by ${m1Gap} points between your best and worst funnels. Message Intelligence will show you which words separate them.`)
   } else if (m1Gap) {
-    insights.push(`First message CTR is nearly identical across your best and worst funnels, a gap of only ${m1Gap} points. Whatever separates them happens after M1, so look further down the flow.`)
+    insights.push(`First message clicked rate is nearly identical across your best and worst funnels, a gap of only ${m1Gap} points. Whatever separates them happens after M1, so look further down the flow.`)
   }
 
   const QUOTED = /["\u201C\u201D'].+["\u201C\u201D']/
@@ -147,7 +147,7 @@ export default function Overview() {
 
   const stepCols = []
   for (let i = 1; i <= maxSteps; i++) {
-    stepCols.push({ openKey: `m${i}_open_rate_pct`, ctrKey: `m${i}_ctr_pct`, label: `M${i}` })
+    stepCols.push({ openKey: `m${i}_open_rate_pct`, ctrKey: `m${i}_step_ctr_pct`, label: `M${i}` })
   }
 
   if (funnels.length === 0) return (
@@ -184,11 +184,11 @@ export default function Overview() {
       </div>
 
       <div className="stat-grid">
-        <StatCard label="Avg M1 Open Rate" value={averages.m1_open_rate_pct ?? 'n/a'} unit="%" delta="weighted by volume" />
-        <StatCard label="Avg M1 CTR" value={averages.m1_ctr_pct ?? 'n/a'} unit="%" delta="weighted by volume" />
-        <StatCard label="Avg M2 CTR" value={averages.m2_ctr_pct ?? 'n/a'} unit="%" delta="weighted by volume" />
-        <StatCard label="Avg Funnel CR" value={averages.funnel_cr_pct ?? 'n/a'} unit="%" delta="all branches counted" />
-        <StatCard label="Total Volume" value={totalVol.toLocaleString()} unit="" delta="people who entered" />
+        <StatCard label="First message opened" value={averages.m1_open_rate_pct ?? 'n/a'} unit="%" delta="weighted by volume" />
+        <StatCard label="First message clicked" value={averages.m1_ctr_pct ?? 'n/a'} unit="%" delta="weighted by volume" />
+        <StatCard label="Second message clicked" value={averages.m2_step_ctr_pct ?? 'n/a'} unit="%" delta="weighted by volume" />
+        <StatCard label="Finish rate" value={averages.funnel_cr_pct ?? 'n/a'} unit="%" delta="all branches counted" />
+        <StatCard label="People reached" value={totalVol.toLocaleString()} unit="" delta="people who entered" />
       </div>
 
       {filtered.some(f => f.chain_valid === false) && (
@@ -214,8 +214,8 @@ export default function Overview() {
 
       {best && bestM1 && (
         <div className="insight">
-          <strong>{best.name}</strong> is your top converting funnel at <strong>{best.funnel_cr_pct}% CR</strong>.{' '}
-          <strong>{bestM1.name}</strong> leads M1 CTR at <strong>{bestM1.m1_ctr_pct}%</strong>
+          <strong>{best.name}</strong> finishes strongest at <strong>{best.funnel_cr_pct}% CR</strong>.{' '}
+          <strong>{bestM1.name}</strong> has the best first message, clicked by <strong>{bestM1.m1_ctr_pct}%</strong>
           {bestM1.m1_ctr_pct > (averages.m1_ctr_pct || 0)
             ? `. ${(bestM1.m1_ctr_pct - averages.m1_ctr_pct).toFixed(1)}pp above average.`
             : '.'}
@@ -238,12 +238,12 @@ export default function Overview() {
               <th className={'sortable' + (sort.key === 'version' ? ' sorted' : '')} onClick={() => toggleSort('version')}>Type {arrow('version')}</th>
               {stepCols.map(col => (
                 <>
-                  <th key={col.openKey} className={'sortable' + (sort.key === col.openKey ? ' sorted' : '')} onClick={() => toggleSort(col.openKey)}>${col.label} Open {arrow(col.openKey)}</th>
-                  <th key={col.ctrKey} className={'sortable' + (sort.key === col.ctrKey ? ' sorted' : '')} onClick={() => toggleSort(col.ctrKey)}>${col.label} CTR {arrow(col.ctrKey)}</th>
+                  <th key={col.openKey} className={'sortable' + (sort.key === col.openKey ? ' sorted' : '')} onClick={() => toggleSort(col.openKey)} title="Out of the people who received this message, how many opened it">{col.label} opened {arrow(col.openKey)}</th>
+                  <th key={col.ctrKey} className={'sortable' + (sort.key === col.ctrKey ? ' sorted' : '')} onClick={() => toggleSort(col.ctrKey)} title="Out of the people who opened this message, how many tapped the button">{col.label} clicked {arrow(col.ctrKey)}</th>
                 </>
               ))}
-              <th className={'sortable' + (sort.key === 'funnel_cr_pct' ? ' sorted' : '')} onClick={() => toggleSort('funnel_cr_pct')}>Funnel CR {arrow('funnel_cr_pct')}</th>
-              <th className={'sortable' + (sort.key === 'effective_sent' ? ' sorted' : '')} onClick={() => toggleSort('effective_sent')}>Volume {arrow('effective_sent')}</th>
+              <th className={'sortable' + (sort.key === 'funnel_cr_pct' ? ' sorted' : '')} onClick={() => toggleSort('funnel_cr_pct')} title="Out of everyone who entered the funnel, how many took the final action, counting every branch">Finish rate {arrow('funnel_cr_pct')}</th>
+              <th className={'sortable' + (sort.key === 'effective_sent' ? ' sorted' : '')} onClick={() => toggleSort('effective_sent')} title="People who entered the current version of this funnel">People in {arrow('effective_sent')}</th>
             </tr>
           </thead>
           <tbody>
@@ -321,7 +321,7 @@ export default function Overview() {
                       <span title="Steps from two different branches got mixed together. Showing raw numbers." style={{ fontFamily: 'var(--sans)', fontSize: 9, fontWeight: 600, color: 'var(--gold)', cursor: 'help' }}>check</span>
                     )}
                     {f.funnel_cr_pct != null && f.chain_valid !== false && !f.cr_is_weighted && (
-                      <span title="Only the busiest path is counted here. Upload the screenshots again to capture every branch." style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--gold)', cursor: 'help' }}>maj</span>
+                      <span title="Only the busiest path is counted here. Upload the screenshots again to capture every branch." style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--gold)', cursor: 'help' }}>one path</span>
                     )}
                   </div>
                 </td>
